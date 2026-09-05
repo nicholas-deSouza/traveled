@@ -75,6 +75,23 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (select 1 from public.group_members where group_id = target_group_id and user_id = auth.uid());
 $$;
 
+create or replace function public.is_group_owner(target_group_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.groups where id = target_group_id and created_by = auth.uid());
+$$;
+
+create or replace function public.prevent_trip_access_boundary_changes()
+returns trigger language plpgsql as $$
+begin
+  if new.group_id is distinct from old.group_id or new.created_by is distinct from old.created_by then
+    raise exception 'A trip cannot be transferred to another group or creator';
+  end if;
+  return new;
+end;
+$$;
+create trigger prevent_trip_access_boundary_changes before update on public.trips
+for each row execute procedure public.prevent_trip_access_boundary_changes();
+
 alter table public.profiles enable row level security;
 alter table public.groups enable row level security;
 alter table public.group_members enable row level security;
@@ -89,7 +106,7 @@ create policy "members read their groups" on public.groups for select to authent
 create policy "users create groups" on public.groups for insert to authenticated with check (created_by = auth.uid());
 create policy "owners update groups" on public.groups for update to authenticated using (created_by = auth.uid()) with check (created_by = auth.uid());
 create policy "members read memberships" on public.group_members for select to authenticated using (public.is_group_member(group_id));
-create policy "members add group members" on public.group_members for insert to authenticated with check (public.is_group_member(group_id));
+create policy "owners add group members" on public.group_members for insert to authenticated with check (public.is_group_owner(group_id) and role = 'member');
 create policy "owners remove members" on public.group_members for delete to authenticated using (exists (select 1 from public.groups where id = group_id and created_by = auth.uid()));
 
 create policy "members read trips" on public.trips for select to authenticated using (public.is_group_member(group_id));
