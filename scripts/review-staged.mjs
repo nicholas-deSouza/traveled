@@ -83,7 +83,7 @@ try {
   const names = git('diff', '--cached', '--name-only', '-z').split('\0').filter(Boolean);
   if (names.length === 0) process.exit(0);
   // Reject sensitive paths before reading any staged contents.
-  if (names.some((name) => /(^|\/)(\.env(?:\..*)?|credentials(?:\..*)?|id_rsa|id_ed25519)$|\.(pem|key|p12|pfx)$/i.test(name))) {
+  if (names.some((name) => !/(^|\/)\.env\.example$/i.test(name) && /(^|\/)(\.env(?:\..*)?|credentials(?:\..*)?|id_rsa|id_ed25519)$|\.(pem|key|p12|pfx)$/i.test(name))) {
     throw new Error('A sensitive file is staged. Unstage it before requesting review.');
   }
   const tree = git('write-tree').trim();
