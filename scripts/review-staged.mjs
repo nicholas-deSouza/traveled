@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { accessSync, closeSync, constants, openSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { currentParent, publishNotes } from './local-notes.mjs';
 
 function git(...args) {
   const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
@@ -80,13 +81,18 @@ function progress() {
 }
 let diagnostics;
 try {
-  const names = git('diff', '--cached', '--name-only', '-z').split('\0').filter(Boolean);
+  const names = git('diff', '--cached', '--no-renames', '--name-only', '-z').split('\0').filter(Boolean);
   if (names.length === 0) process.exit(0);
+  // Ignored files can still be force-staged. Keep local rationale out of review.
+  if (names.some((name) => /^(?:NOTES\.md|NOTES\.draft\.json|\.local-notes-.*\.tmp)$/.test(name))) {
+    throw new Error('A local notes file is staged. Unstage it before requesting review.');
+  }
   // Reject sensitive paths before reading any staged contents.
   if (names.some((name) => !/(^|\/)\.env\.example$/i.test(name) && /(^|\/)(\.env(?:\..*)?|credentials(?:\..*)?|id_rsa|id_ed25519)$|\.(pem|key|p12|pfx)$/i.test(name))) {
     throw new Error('A sensitive file is staged. Unstage it before requesting review.');
   }
   const tree = git('write-tree').trim();
+  const parent = currentParent();
   const diff = git('diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=5');
   const directory = mkdtempSync(join(tmpdir(), 'traveled-review-'));
   const schemaPath = join(directory, 'schema.json');
@@ -152,9 +158,10 @@ ${diff}
     process.exit(1);
   }
   if (git('write-tree').trim() !== tree) throw new Error('Staged changes changed during review. Retry git commit.');
-  console.error(paint('✔ REVIEW PASSED · Continuing commit.\n', '1;32'));
+  publishNotes(tree, parent);
+  console.error(paint('✔ REVIEW PASSED · Local notes saved. Continuing commit.\n', '1;32'));
 } catch (error) {
-  console.error(paint('\n✖ COMMIT BLOCKED · Review could not complete', '1;31'));
+  console.error(paint('\n✖ COMMIT BLOCKED · Review or notes could not complete', '1;31'));
   wrapped(error.message);
   if (diagnostics) console.error(`\n  Diagnostic log: ${diagnostics}`);
   console.error('');

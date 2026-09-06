@@ -3,3 +3,7 @@ dist
 .env
 .DS_Store
 *.local
+/plans/
+/NOTES.md
+/NOTES.draft.json
+/.local-notes-*.tmp
