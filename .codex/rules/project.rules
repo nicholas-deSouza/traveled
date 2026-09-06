@@ -1,0 +1,122 @@
+# Repository command policy. The most restrictive matching decision wins.
+
+prefix_rule(
+    pattern = ["pnpm", ["install", "add", "remove"]],
+    decision = "allow",
+    justification = "Package installation and dependency updates are permitted for this project.",
+    match = ["pnpm install", "pnpm add zod", "pnpm remove zod"],
+    not_match = ["pnpm run test"],
+)
+
+prefix_rule(
+    pattern = ["pnpm", "run", ["dev", "build", "lint"]],
+    decision = "allow",
+    justification = "Current development and validation scripts are permitted.",
+    match = ["pnpm run dev", "pnpm run build", "pnpm run lint"],
+    not_match = ["pnpm run test"],
+)
+
+prefix_rule(
+    pattern = ["git", ["status", "log", "diff", "add", "commit", "branch", "checkout"]],
+    decision = "allow",
+    justification = "Routine local Git inspection and changes are permitted.",
+    match = ["git status", "git diff --stat", "git add AGENTS.md", "git commit -m docs", "git branch", "git checkout feature"],
+    not_match = ["git pull", "git push"],
+)
+
+prefix_rule(
+    pattern = ["git", ["pull", "push"]],
+    decision = "prompt",
+    justification = "Remote Git operations require explicit approval.",
+    match = ["git pull", "git push origin main"],
+    not_match = ["git status"],
+)
+
+prefix_rule(
+    pattern = ["rm"],
+    decision = "prompt",
+    justification = "File deletion requires explicit approval.",
+    match = ["rm temporary-file", "rm -rf build"],
+    not_match = ["mv old-name new-name"],
+)
+
+prefix_rule(
+    pattern = [["ls", "cat", "mkdir", "mv", "cp", "echo", "pwd", "cd"]],
+    decision = "allow",
+    justification = "Ordinary local shell utilities are permitted.",
+    match = ["ls", "cat README.md", "mkdir scratch", "mv old-name new-name", "cp source destination", "echo ready", "pwd", "cd src"],
+    not_match = ["rm temporary-file"],
+)
+
+# These prohibitions take precedence over broader allow or prompt rules above.
+prefix_rule(
+    pattern = ["sudo"],
+    decision = "forbidden",
+    justification = "Do not run commands with elevated privileges.",
+    match = ["sudo pnpm install"],
+    not_match = ["pnpm install"],
+)
+
+prefix_rule(
+    pattern = ["chmod", "777"],
+    decision = "forbidden",
+    justification = "Do not grant world-writable permissions.",
+    match = ["chmod 777 scripts"],
+    not_match = ["chmod 755 scripts"],
+)
+
+prefix_rule(
+    pattern = ["chown"],
+    decision = "forbidden",
+    justification = "Do not change file ownership.",
+    match = ["chown user file"],
+    not_match = ["chmod 755 file"],
+)
+
+prefix_rule(
+    pattern = ["git", "reset", "--hard"],
+    decision = "forbidden",
+    justification = "Do not discard working-tree changes with a hard reset.",
+    match = ["git reset --hard HEAD"],
+    not_match = ["git reset --soft HEAD~1"],
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f"]],
+    decision = "forbidden",
+    justification = "Do not force-push; use a normal push only after approval.",
+    match = ["git push --force origin main", "git push -f origin main"],
+    not_match = ["git push origin main"],
+)
+
+prefix_rule(
+    pattern = ["rm", ["-rf", "-fr"], "/"],
+    decision = "forbidden",
+    justification = "Never recursively delete the filesystem root.",
+    match = ["rm -rf /", "rm -fr /"],
+    not_match = ["rm -rf build"],
+)
+
+prefix_rule(
+    pattern = ["rm", "-r", "-f", "/"],
+    decision = "forbidden",
+    justification = "Never recursively delete the filesystem root.",
+    match = ["rm -r -f /"],
+    not_match = ["rm -r -f build"],
+)
+
+prefix_rule(
+    pattern = ["rm", "-f", "-r", "/"],
+    decision = "forbidden",
+    justification = "Never recursively delete the filesystem root.",
+    match = ["rm -f -r /"],
+    not_match = ["rm -f -r build"],
+)
+
+prefix_rule(
+    pattern = ["cat", ".env"],
+    decision = "forbidden",
+    justification = "Do not read environment files containing credentials.",
+    match = ["cat .env"],
+    not_match = ["cat .env.example", "cat README.md"],
+)
