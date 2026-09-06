@@ -15,8 +15,13 @@ It does not receive the repository's unstaged files or previous agent explanatio
 
 The commit waits for review (up to five minutes). Findings, CLI failures, malformed
 reports, and index changes during review block the commit. An empty index skips
-review. Findings and the temporary report path appear in the terminal. Temporary
-reports are retained for inspection and subject to the OS's temporary-file cleanup.
+review. Interactive terminals show a spinner and elapsed time; redirected output
+shows plain progress messages. A green success line continues the commit; a red
+blocked heading displays numbered findings with severity, location, and explanation.
+Colors respect `NO_COLOR`; non-interactive and dumb terminals use plain output.
+Raw agent output is saved to a temporary diagnostic log instead of printed. Its
+path is shown only when review cannot complete. Reports and logs are retained
+for inspection and subject to the OS's temporary-file cleanup.
 Sensitive filenames such as `.env` and private key files are rejected before diff
 contents are read. This filename check is not a general secret scanner.
 
