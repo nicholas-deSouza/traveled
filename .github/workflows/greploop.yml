@@ -31,7 +31,8 @@ jobs:
     timeout-minutes: 8
     permissions:
       contents: read
-      pull-requests: read
+      # Attempt reservations are comments on a pull request.
+      pull-requests: write
       issues: write
       checks: read
     outputs:

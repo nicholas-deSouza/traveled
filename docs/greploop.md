@@ -140,6 +140,13 @@ as well if your organization requires all actions to be immutable.
 - **Missing credentials / unauthorized:** verify App ID, installation, PEM secret,
   repository permissions, and OpenAI API access. The desktop ChatGPT login does
   not configure this workflow's API secret.
+- **403 when intake posts an attempt comment:** intake uses the built-in
+  `GITHUB_TOKEN`, not the publishing App token. Its job must request
+  `pull-requests: write`. After merging a permissions fix, start a new manual run
+  from `main`; rerunning an older run uses its original workflow revision. A
+  rejected comment does not reserve an attempt. The separate Node 20 deprecation
+  warning is not the cause of this API permission failure; do not opt into the
+  deprecated runtime to fix a 403.
 - **Attempt already used:** inspect that attempt's run and candidate artifact.
   Failed attempts are not silently retried. Fix the blocker and push a new
   reviewed commit; raise the PR budget deliberately if it has been exhausted.
