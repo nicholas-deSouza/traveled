@@ -9,14 +9,13 @@ import { JoinGroupPage } from './pages/JoinGroupPage';
 import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { PasswordPage } from './pages/PasswordPage';
 import { RequireAuth } from './components/auth/RequireAuth';
-import { isSupabaseConfigured } from './lib/supabase';
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
-        <Route path="/" element={isSupabaseConfigured ? <Navigate to="/groups" replace /> : <DashboardPage />} />
+        <Route path="/" element={<DashboardPage />} />
         <Route element={<RequireAuth />}>
           <Route path="/groups" element={<GroupsPage />} />
           <Route path="/groups/:groupId" element={<GroupDetailPage />} />
