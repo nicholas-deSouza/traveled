@@ -38,7 +38,7 @@ export function AppShell() {
           {navItems.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} className={({ isActive }) => cn("flex items-center gap-2 rounded-full px-3 py-2 text-sm", isActive ? "bg-ink text-white" : "text-ink/65 hover:bg-ink/5")}><Icon className="h-4 w-4" />{label}</NavLink>)}
         </nav>
         {signedIn
-          ? <Button size="sm" variant="ghost" disabled={busy} onClick={signOut}>{busy ? 'Signing out…' : 'Sign out'}</Button>
+          ? <div className="flex items-center gap-1"><Button size="sm" variant="ghost" asChild><Link to="/account/password">Password</Link></Button><Button size="sm" variant="ghost" disabled={busy} onClick={signOut}>{busy ? 'Signing out…' : 'Sign out'}</Button></div>
           : <Button size="sm" asChild><Link to="/login">Sign in</Link></Button>}
       </header>
       <main className="mx-auto max-w-7xl">{error && <p role="alert" className="mt-4 text-red-700">{error}</p>}<Outlet /></main>

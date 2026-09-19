@@ -1,13 +1,11 @@
 import { Navigate, useSearchParams } from 'react-router-dom';
+import { authDestination } from '../lib/authRedirect';
 
 export function AuthCallbackPage() {
   const [params] = useSearchParams();
-  let next = '/groups';
-  try {
-    const target = new URL(params.get('next') || next, window.location.origin);
-    if (target.origin === window.location.origin && (target.pathname === '/join' || target.pathname === '/groups' || /^\/(groups|trips)\/[a-f0-9-]+$/.test(target.pathname))) {
-      next = target.pathname + target.search + target.hash;
-    }
-  } catch { /* An invalid redirect returns to the user's groups. */ }
+  const destination = authDestination(params.get('next'));
+  const next = params.get('intent') === 'password' && !destination.startsWith('/account/password')
+    ? `/account/password?next=${encodeURIComponent(destination)}`
+    : destination;
   return <Navigate to={next} replace />;
 }
