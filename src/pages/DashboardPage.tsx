@@ -7,6 +7,7 @@ import { demoTrips } from "../types/domain";
 export function DashboardPage() {
   return (
     <div className="py-5 md:py-8">
+      <p className="mb-5 rounded-xl bg-sand p-3 text-sm">Preview with sample trips. <Link to="/groups" className="underline">Connect Supabase to create your own groups.</Link></p>
       <section className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div><p className="mb-1 text-sm font-medium uppercase tracking-[0.18em] text-ember">The shared atlas</p><h1 className="font-display text-4xl leading-none md:text-6xl">Where we’ve<br />been together.</h1></div>
         <p className="max-w-xs text-sm leading-6 text-ink/65">Spin the globe, trace your memories, and add the moments your group will want to keep.</p>

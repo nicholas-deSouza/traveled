@@ -1,11 +1,51 @@
-import { ImagePlus, MapPin } from "lucide-react";
-import { useParams } from "react-router-dom";
-import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { demoTrips } from "../types/domain";
+import { useState, type FormEvent } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { Button } from '../components/ui/button';
+import { Card } from '../components/ui/card';
+import { errorMessage, loadTrip, releasePhotos, uploadPhoto } from '../lib/groups';
+import { useResource } from '../lib/useResource';
+import { useSession } from '../lib/useSession';
+
+function disposeTrip(data: Awaited<ReturnType<typeof loadTrip>>) { releasePhotos(data.photos); }
 
 export function TripDetailPage() {
-  const { tripId } = useParams();
-  const trip = demoTrips.find((entry) => entry.id === tripId) ?? demoTrips[0];
-  return <div className="py-8"><p className="text-sm font-medium uppercase tracking-[.18em] text-ember">The wanderers</p><div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="font-display text-5xl">{trip.title}</h1><p className="mt-2 text-ink/65">{trip.location} · {trip.dateRange}</p></div><Button><ImagePlus className="mr-1.5 h-4 w-4" />Add photos</Button></div><Card className="mt-8 grid min-h-72 place-items-center overflow-hidden bg-gradient-to-br from-moss via-ink to-[#204F66] p-6 text-center text-white"><div><MapPin className="mx-auto mb-3 h-8 w-8 text-sand" /><p className="font-display text-3xl">Photo map</p><p className="mt-2 max-w-sm text-sm text-white/70">Map pins will come from each uploaded photo’s GPS metadata.</p></div></Card><section className="mt-8"><h2 className="font-display text-2xl">Moments</h2><div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="aspect-square rounded-2xl bg-gradient-to-br from-sand via-[#d9b48b] to-ember/80" />)}</div></section></div>;
+  const { tripId = '' } = useParams();
+  return <TripContent key={tripId} tripId={tripId} />;
+}
+
+function TripContent({ tripId }: { tripId: string }) {
+  const { user } = useSession();
+  const { data, loading, error, reload } = useResource(tripId, loadTrip, disposeTrip);
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  async function upload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data || busy || files.length === 0) return;
+    const form = event.currentTarget;
+    setBusy(true); setMessage(''); setUploadError('');
+    let count = 0;
+    try {
+      for (const file of files) {
+        setMessage(`Uploading photo ${count + 1} of ${files.length}…`);
+        await uploadPhoto(data.trip, user.id, file);
+        count++;
+      }
+      setMessage(`${count} ${count === 1 ? 'photo' : 'photos'} added.`);
+    } catch (error) {
+      setMessage(count ? `${count} photos added before the upload stopped.` : '');
+      setUploadError(errorMessage(error));
+    } finally {
+      setFiles([]); form.reset(); setBusy(false);
+      if (count) reload();
+    }
+  }
+  if (loading) return <p className="py-12" role="status">Loading trip and photos…</p>;
+  if (error || !data) return <div className="py-12"><p role="alert">{error}</p><Button onClick={reload} variant="outline" className="mt-4">Retry</Button><Link to="/groups" className="ml-4 underline">Your groups</Link></div>;
+  return <div className="py-8"><Link className="text-sm text-moss hover:underline" to={`/groups/${data.group.id}`}>← {data.group.name}</Link><h1 className="mt-4 break-words font-display text-5xl">{data.trip.title}</h1><p className="mt-3 text-ink/65">{data.trip.starts_on || 'No dates set'}{data.trip.ends_on ? ` → ${data.trip.ends_on}` : ''} · Only group members</p>{data.trip.description && <p className="mt-3 break-words">{data.trip.description}</p>}
+    <Card className="mt-8 p-5"><form onSubmit={upload} className="flex flex-wrap items-end gap-4"><label className="block text-sm font-medium">Add photos<input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" disabled={busy} onChange={event => setFiles(Array.from(event.target.files ?? []))} className="mt-2 block max-w-full rounded-lg text-sm file:mr-3 file:rounded-full file:border-0 file:bg-sand file:px-4 file:py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ember" /><span className="mt-2 block text-xs text-ink/60">JPEG, PNG, WebP, or GIF. Up to 20 MB per photo.</span></label><Button disabled={busy || !files.length}>{busy ? 'Uploading…' : `Upload${files.length ? ` ${files.length} photos` : ' photos'}`}</Button></form></Card>
+    {message && <p className="mt-4 text-sm" role="status">{message}</p>}{uploadError && <p className="mt-4 text-sm text-red-700" role="alert">{uploadError}</p>}
+    <section className="mt-8"><h2 className="font-display text-2xl">Moments · {data.photos.length}</h2>{data.photos.length === 0 && <p className="mt-4 text-ink/65">Your first memory belongs here. Add photos from this trip.</p>}<div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">{data.photos.map((photo, index) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" aria-label={`Open photo ${index + 1} from ${data.trip.title}`} className="overflow-hidden rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ember"><img src={photo.url} alt={`Photo ${index + 1} from ${data.trip.title}`} loading="lazy" className="aspect-square w-full object-cover transition hover:scale-105" /></a>)}</div></section>
+  </div>;
 }

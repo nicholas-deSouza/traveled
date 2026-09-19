@@ -1,0 +1,10 @@
+# Project-scoped Codex CLI config. Loaded only for trusted checkouts of this repo.
+# See .codex/rules/project.rules for the command-approval policy.
+
+default_permissions = "workspace-no-env"
+
+[permissions.workspace-no-env]
+extends = ":workspace"
+
+[permissions.workspace-no-env.filesystem.":workspace_roots"]
+"**/*.env*" = "deny"
