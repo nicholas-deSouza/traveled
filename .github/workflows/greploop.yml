@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
       - id: controller
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         id: intake
         env:
           GREPLOOP_MAX_ATTEMPTS: ${{ vars.GREPLOOP_MAX_ATTEMPTS || '3' }}
@@ -193,7 +193,7 @@ jobs:
           node -e 'require("fs").writeFileSync("review.json", process.env.SNAPSHOT)'
           node controller/.github/scripts/greploop-patch.mjs apply source "$REVIEW_SHA" review.json candidate/result.json candidate
       # No PR code, dependency installation, or build commands run in this job.
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app
         with:
           app-id: ${{ vars.GREPLOOP_APP_ID }}
@@ -201,7 +201,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
       - name: Push validated fix and resolve addressed threads
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           SNAPSHOT: ${{ needs.intake.outputs.snapshot }}
           PUSH_TOKEN: ${{ steps.app.outputs.token }}

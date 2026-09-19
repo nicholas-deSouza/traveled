@@ -119,9 +119,13 @@ merging is manual.
 | `GREPTILE_BOT_LOGIN` | `greptile-apps[bot]` | Exact trusted reviewer login |
 | `GREPTILE_APP_SLUG` | `greptile-apps` | Exact App slug on Greptile's check run |
 
-The Codex action is pinned to a verified commit of `v1`. Other actions reference
-major-version tags. If your organization requires all actions to be immutable,
-replace those remaining `uses:` versions with reviewed full commit SHAs.
+The Codex action, `actions/create-github-app-token`, and every use of
+`actions/github-script` are pinned to full commit SHAs from their official
+repositories. These pins prevent upstream tag changes from silently replacing
+the credential-handling action code. To update them, review the official release,
+resolve its full commit SHA, update the pin and version comment, and validate the
+workflow through a PR. Other actions still reference major-version tags; pin those
+as well if your organization requires all actions to be immutable.
 
 ## Troubleshooting
 
