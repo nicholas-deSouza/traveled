@@ -1,0 +1,41 @@
+name: Label new PRs for Greploop
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Metadata only: never check out or execute PR code with this token.
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const name = 'greploop';
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              try {
+                await github.rest.issues.createLabel({
+                  owner, repo, name, color: '0E8A16',
+                  description: 'Enable automatic Codex fixes for Greptile findings'
+                });
+              } catch (createError) {
+                if (createError.status !== 422) throw createError;
+                // Another newly opened PR may have created it concurrently.
+                await github.rest.issues.getLabel({ owner, repo, name });
+              }
+            }
+            await github.rest.issues.addLabels({
+              owner, repo,
+              issue_number: context.payload.pull_request.number,
+              labels: [name]
+            });

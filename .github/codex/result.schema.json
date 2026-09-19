@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "addressedThreadIds", "remainingIssues"],
+  "properties": {
+    "summary": { "type": "string" },
+    "addressedThreadIds": { "type": "array", "items": { "type": "string" } },
+    "remainingIssues": { "type": "array", "items": { "type": "string" } }
+  }
+}

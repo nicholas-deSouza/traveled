@@ -1,0 +1,9 @@
+{
+  "triggerOnUpdates": true,
+  "statusCheck": true,
+  "shouldUpdateDescription": false,
+  "updateExistingSummaryComment": true,
+  "hideFooter": false,
+  "summarySection": { "included": true },
+  "confidenceScoreSection": { "included": true }
+}

@@ -1,0 +1,231 @@
+name: Greploop
+
+on:
+  issue_comment:
+    types: [created, edited]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number (run this workflow from the default branch)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: greploop-${{ github.event.inputs.pr || github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  GREPTILE_BOT_LOGIN: ${{ vars.GREPTILE_BOT_LOGIN || 'greptile-apps[bot]' }}
+  GREPTILE_APP_SLUG: ${{ vars.GREPTILE_APP_SLUG || 'greptile-apps' }}
+
+jobs:
+  intake:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.pull_request && github.event.comment.user.type == 'Bot' &&
+       github.event.comment.user.login == (vars.GREPTILE_BOT_LOGIN || 'greptile-apps[bot]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      checks: read
+    outputs:
+      run: ${{ steps.intake.outputs.run }}
+      sha: ${{ steps.intake.outputs.sha }}
+      snapshot: ${{ steps.intake.outputs.snapshot }}
+      controller: ${{ steps.controller.outputs.commit }}
+    steps:
+      # Controller code always comes from the default branch, never the PR.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: controller
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        id: intake
+        env:
+          GREPLOOP_MAX_ATTEMPTS: ${{ vars.GREPLOOP_MAX_ATTEMPTS || '3' }}
+        with:
+          script: |
+            const { intake } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/greploop.mjs`);
+            await intake({ github, context, core });
+      - uses: actions/upload-artifact@v4
+        if: steps.intake.outputs.run == 'true'
+        with:
+          name: greploop-input
+          path: |
+            review.json
+            prompt.md
+          retention-days: 7
+
+  fix:
+    needs: intake
+    if: needs.intake.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.controller }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: greploop-input
+          path: input
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.18.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+        working-directory: source
+      - uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          allow-bot-users: ${{ env.GREPTILE_BOT_LOGIN }}
+          permission-profile: ':workspace'
+          safety-strategy: drop-sudo
+          working-directory: ${{ github.workspace }}/source
+          prompt-file: ${{ github.workspace }}/input/prompt.md
+          output-schema-file: ${{ github.workspace }}/controller/.github/codex/result.schema.json
+          output-file: ${{ runner.temp }}/codex-result.json
+      - name: Retain Codex report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: greploop-report
+          path: ${{ runner.temp }}/codex-result.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Export source patch
+        env:
+          REVIEW_SHA: ${{ needs.intake.outputs.sha }}
+        run: >-
+          node controller/.github/scripts/greploop-patch.mjs export source "$REVIEW_SHA"
+          input/review.json "$RUNNER_TEMP/codex-result.json" candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: greploop-candidate
+          path: candidate/
+          retention-days: 7
+
+  validate:
+    needs: [intake, fix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.controller }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: greploop-candidate
+          path: candidate
+      - name: Apply and enforce patch policy
+        env:
+          REVIEW_SHA: ${{ needs.intake.outputs.sha }}
+          SNAPSHOT: ${{ needs.intake.outputs.snapshot }}
+        run: |
+          node -e 'require("fs").writeFileSync("review.json", process.env.SNAPSHOT)'
+          node controller/.github/scripts/greploop-patch.mjs apply source "$REVIEW_SHA" review.json candidate/result.json candidate
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.18.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+        working-directory: source
+      - run: pnpm lint
+        working-directory: source
+      - run: pnpm build
+        working-directory: source
+
+  publish:
+    needs: [intake, validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.controller }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: greploop-candidate
+          path: candidate
+      - name: Independently enforce patch policy
+        env:
+          REVIEW_SHA: ${{ needs.intake.outputs.sha }}
+          SNAPSHOT: ${{ needs.intake.outputs.snapshot }}
+        run: |
+          node -e 'require("fs").writeFileSync("review.json", process.env.SNAPSHOT)'
+          node controller/.github/scripts/greploop-patch.mjs apply source "$REVIEW_SHA" review.json candidate/result.json candidate
+      # No PR code, dependency installation, or build commands run in this job.
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        id: app
+        with:
+          app-id: ${{ vars.GREPLOOP_APP_ID }}
+          private-key: ${{ secrets.GREPLOOP_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Push validated fix and resolve addressed threads
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          SNAPSHOT: ${{ needs.intake.outputs.snapshot }}
+          PUSH_TOKEN: ${{ steps.app.outputs.token }}
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+          script: |
+            const { readFileSync } = await import('node:fs');
+            const { execFileSync } = await import('node:child_process');
+            const { assertCurrent, resolveAddressed } = await import(`${process.env.GITHUB_WORKSPACE}/controller/.github/scripts/greploop.mjs`);
+            const snapshot = JSON.parse(process.env.SNAPSHOT);
+            const result = JSON.parse(readFileSync('candidate/result.json', 'utf8'));
+            await assertCurrent({ github, context }, snapshot);
+            const options = { cwd: 'source', encoding: 'utf8' };
+            execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false',
+              '-c', 'user.name=Greploop', '-c', 'user.email=greploop@users.noreply.github.com',
+              'commit', '-m', `fix: address Greptile feedback (attempt ${snapshot.attempt})`], options);
+            await assertCurrent({ github, context }, snapshot);
+            const auth = Buffer.from(`x-access-token:${process.env.PUSH_TOKEN}`).toString('base64');
+            core.setSecret(auth);
+            execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'push', 'origin', `HEAD:refs/heads/${snapshot.branch}`], {
+              ...options,
+              env: { ...process.env, GIT_CONFIG_COUNT: '1',
+                GIT_CONFIG_KEY_0: `http.${context.serverUrl}/.extraheader`,
+                GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${auth}` }
+            });
+            await resolveAddressed({ github }, snapshot, result.addressedThreadIds);
+            await core.summary.addRaw('Validated fix pushed. Greptile and CI will review the new commit. Merge remains manual.').write();
