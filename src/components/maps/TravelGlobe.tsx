@@ -31,12 +31,24 @@ export function TravelGlobe() {
     let interacting = false;
     const delayRotation = () => { resumeAt = performance.now() + 5000; };
     const startInteraction = () => { interacting = true; delayRotation(); };
-    const endInteraction = () => { interacting = false; delayRotation(); };
-    const visibilityChanged = () => { previous = 0; delayRotation(); };
+    const endInteraction = () => {
+      if (!interacting) return;
+      interacting = false;
+      delayRotation();
+    };
+    // A release outside the browser may never produce pointerup in this window.
+    const recoverInteraction = (event: PointerEvent) => {
+      if (event.buttons === 0) endInteraction();
+    };
+    const visibilityChanged = () => { endInteraction(); previous = 0; delayRotation(); };
     const element = container.current;
     element.addEventListener('pointerdown', startInteraction);
-    window.addEventListener('pointerup', endInteraction);
-    window.addEventListener('pointercancel', endInteraction);
+    window.addEventListener('pointerup', endInteraction, true);
+    window.addEventListener('pointercancel', endInteraction, true);
+    window.addEventListener('pointermove', recoverInteraction, true);
+    window.addEventListener('blur', endInteraction);
+    element.addEventListener('lostpointercapture', endInteraction);
+    element.addEventListener('click', endInteraction);
     element.addEventListener('wheel', delayRotation, { passive: true });
     element.addEventListener('keydown', delayRotation);
     document.addEventListener('visibilitychange', visibilityChanged);
@@ -68,8 +80,12 @@ export function TravelGlobe() {
       cancelAnimationFrame(frame);
       media.removeEventListener('change', preferenceChanged);
       element.removeEventListener('pointerdown', startInteraction);
-      window.removeEventListener('pointerup', endInteraction);
-      window.removeEventListener('pointercancel', endInteraction);
+      window.removeEventListener('pointerup', endInteraction, true);
+      window.removeEventListener('pointercancel', endInteraction, true);
+      window.removeEventListener('pointermove', recoverInteraction, true);
+      window.removeEventListener('blur', endInteraction);
+      element.removeEventListener('lostpointercapture', endInteraction);
+      element.removeEventListener('click', endInteraction);
       element.removeEventListener('wheel', delayRotation);
       element.removeEventListener('keydown', delayRotation);
       document.removeEventListener('visibilitychange', visibilityChanged);

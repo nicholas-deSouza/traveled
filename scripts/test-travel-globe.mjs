@@ -16,7 +16,7 @@ function fixture(configuredStyle) {
       listeners,
       addEventListener: (name, handler) => listeners.set(name, handler),
       removeEventListener: name => listeners.delete(name),
-      emit: name => listeners.get(name)?.(),
+      emit: (name, event) => listeners.get(name)?.(event),
     };
   }
   const element = target();
@@ -82,6 +82,37 @@ test('explicit pause survives interaction and only resumes on request', () => {
   f.toggle(); f.element.emit('wheel'); f.tick(6000);
   assert.equal(f.longitude(), 0);
   f.toggle(); f.tick(); assert(f.longitude() > 0);
+});
+
+test('missed pointer releases recover after focus, visibility, capture, or pointer changes', () => {
+  for (const recover of [
+    f => f.window.emit('blur'),
+    f => f.document.emit('visibilitychange'),
+    f => f.element.emit('lostpointercapture'),
+    f => f.element.emit('click'),
+    f => f.window.emit('pointercancel'),
+    f => f.window.emit('pointermove', { buttons: 0 }),
+  ]) {
+    const f = fixture();
+    f.element.emit('pointerdown');
+    f.tick(6000); assert.equal(f.longitude(), 0);
+    recover(f);
+    f.tick(4999); assert.equal(f.longitude(), 0);
+    f.tick(16); assert(f.longitude() > 0);
+  }
+});
+
+test('clicking elsewhere on the page does not pause idle rotation', () => {
+  const f = fixture();
+  f.window.emit('pointerup');
+  f.tick(16); assert(f.longitude() > 0);
+});
+
+test('moving with a held pointer does not resume rotation', () => {
+  const f = fixture();
+  f.element.emit('pointerdown');
+  f.window.emit('pointermove', { buttons: 1 });
+  f.tick(6000); assert.equal(f.longitude(), 0);
 });
 
 test('hidden pages, reduced motion, and ongoing map movement prevent rotation', () => {
