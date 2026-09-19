@@ -1,4 +1,4 @@
-import { useState, type SubmitEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { MapPinned } from 'lucide-react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
@@ -17,7 +17,7 @@ export function LoginPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  async function submit(event: SubmitEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase || busy) return;
     setBusy(true);

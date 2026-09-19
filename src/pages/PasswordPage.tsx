@@ -1,4 +1,4 @@
-import { useState, type SubmitEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Field } from '../components/ui/field';
@@ -17,7 +17,7 @@ export function PasswordPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
-  async function submit(event: SubmitEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase || busy) return;
     setError('');
