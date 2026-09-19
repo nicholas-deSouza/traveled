@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 export type Group = { id: string; name: string; created_by: string };
 export type Trip = { id: string; group_id: string; title: string; description: string | null; starts_on: string | null; ends_on: string | null };
 export type Member = { user_id: string; role: 'owner' | 'member'; profiles: { display_name: string | null } | null };
-export type Photo = { id: string; storage_path: string; uploaded_by: string; url: string };
+export type Photo = { id: string; storage_path: string; uploaded_by: string; url: string | null };
 
 function client() {
   if (!supabase) throw new Error('Connect Supabase to use groups.');
@@ -72,26 +72,38 @@ export async function loadTrip(id: string) {
   if (error) throw new Error('This trip is unavailable. You must belong to its group to open it.');
   const { data: group, error: groupError } = await db.from('groups').select('id, name, created_by').eq('id', trip.group_id).single();
   if (groupError) throw groupError;
-  const { data: rows, error: photosError } = await db.from('photos').select('id, storage_path, uploaded_by').eq('trip_id', id).order('created_at', { ascending: false });
-  if (photosError) throw photosError;
-  // Authenticated downloads check membership on every load. Object URLs avoid
-  // handing out reusable signed links that outlive a membership change.
-  const photos: Photo[] = [];
-  try {
-    for (const row of rows) {
+  return { trip: trip as Trip, group: group as Group };
+}
+
+export const PHOTO_PAGE_SIZE = 8;
+
+export async function loadTripPhotos(id: string, page = 0) {
+  if (!Number.isSafeInteger(page) || page < 0) throw new Error('Invalid photo page.');
+  const db = client();
+  const start = page * PHOTO_PAGE_SIZE;
+  // One extra metadata row indicates a next page without downloading that photo.
+  const { data: rows, error } = await db.from('photos')
+    .select('id, storage_path, uploaded_by').eq('trip_id', id)
+    .order('created_at', { ascending: false }).order('id', { ascending: false })
+    .range(start, start + PHOTO_PAGE_SIZE);
+  if (error) throw error;
+  // Only this page is downloaded, concurrently. Each authenticated download
+  // checks membership; no reusable signed URLs outlive a membership change.
+  const photos: Photo[] = await Promise.all(rows.slice(0, PHOTO_PAGE_SIZE).map(async row => {
+    try {
       const { data, error: downloadError } = await db.storage.from('trip-photos').download(row.storage_path);
-      if (downloadError) throw downloadError;
-      photos.push({ ...row, url: URL.createObjectURL(data) });
+      if (downloadError || !data) return { ...row, url: null };
+      return { ...row, url: URL.createObjectURL(data) };
+    } catch {
+      // Stale metadata or an individual network failure must not hide the trip.
+      return { ...row, url: null };
     }
-  } catch (error) {
-    releasePhotos(photos);
-    throw error;
-  }
-  return { trip: trip as Trip, group: group as Group, photos };
+  }));
+  return { photos, hasMore: rows.length > PHOTO_PAGE_SIZE };
 }
 
 export function releasePhotos(photos: Photo[]) {
-  photos.forEach(photo => URL.revokeObjectURL(photo.url));
+  photos.forEach(photo => { if (photo.url) URL.revokeObjectURL(photo.url); });
 }
 
 export async function uploadPhoto(trip: Trip, userId: string, file: File) {
