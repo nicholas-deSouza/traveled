@@ -20,6 +20,14 @@ Traveled is a group-based travel journal: friends create a group, manually creat
 
 The app displays OpenFreeMap's detailed Liberty vector style when `VITE_MAP_STYLE_URL` is absent. It includes administrative boundaries and city labels as the user zooms in. Set that environment variable to your selected production vector-tile style before deploying.
 
+## CI and automated review fixes
+
+GitHub Actions runs lint and build checks. New PRs automatically receive the
+`greploop` label so the Greptile → Codex loop can fix application-source findings
+and push validated updates to eligible PR branches. Remove the label to opt out.
+See [Greploop setup](docs/greploop.md) for GitHub credentials, activation, limits,
+and troubleshooting. Final merging remains manual.
+
 ## MVP domain model
 
 ```text
