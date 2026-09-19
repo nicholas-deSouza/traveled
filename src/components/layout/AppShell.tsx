@@ -35,7 +35,7 @@ export function AppShell() {
       <header className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-ink/10 bg-white/80 px-4 py-3 backdrop-blur md:px-5">
         <Link to="/" className="flex items-center gap-2 font-display text-2xl tracking-tight"><MapPinned className="h-5 w-5 text-ember" /> Traveled</Link>
         <nav aria-label="Main navigation" className="flex items-center gap-1">
-          {navItems.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} className={({ isActive }) => cn("flex items-center gap-2 rounded-full px-3 py-2 text-sm", isActive ? "bg-ink text-white" : "text-ink/65 hover:bg-ink/5")}><Icon className="h-4 w-4" />{label}</NavLink>)}
+          {navItems.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => cn("flex items-center gap-2 rounded-full px-3 py-2 text-sm", isActive ? "bg-ink text-white" : "text-ink/65 hover:bg-ink/5")}><Icon className="h-4 w-4" />{label}</NavLink>)}
         </nav>
         {signedIn
           ? <div className="flex items-center gap-1"><Button size="sm" variant="ghost" asChild><Link to="/account/password">Password</Link></Button><Button size="sm" variant="ghost" disabled={busy} onClick={signOut}>{busy ? 'Signing out…' : 'Sign out'}</Button></div>
