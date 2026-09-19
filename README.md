@@ -42,6 +42,16 @@ Every group member can view and contribute photos to that group’s trips. Photo
 
 ## Groups and access
 
+### Password sign-in
+
+- Signed-in users can select **Password** in the header to set or change their password. Passwords must contain at least 8 characters and satisfy any additional password rules configured in Supabase.
+- New users start with a magic link to verify their email, then can set a password before continuing. Existing users can keep using magic links or use email and password at `/login`.
+- **Set or reset password** on the login screen sends existing users a one-time recovery email. Its callback (`/auth/callback?intent=password&next=…`) opens the authenticated password form. The original group, trip, or invitation destination is preserved.
+- Keep email authentication enabled and allow the callback URL, including its query parameters, in Supabase's Redirect URLs for each deployed origin. The local wildcard in setup step 5 already covers this flow. Recovery email templates should use Supabase's `{{ .ConfirmationURL }}` link. See [Supabase password authentication](https://supabase.com/docs/guides/auth/passwords).
+- Verify with a test account: sign in by magic link, save a password, sign out, and sign in with that password. Then request a password reset and follow its email; verify mismatched passwords are rejected, a new password works, an expired link offers a retry, and an invitation still opens after setup.
+
+### Shared trips
+
 - `/groups` lists only your groups and lets you create one. The creator automatically becomes its owner.
 - `/groups/:groupId` lists that group's trips and members. All members can create trips.
 - Owners can generate, replace, copy, and revoke a shared invitation link. Links expire after seven days, support multiple invitees, and grant the `member` role. Only a hash is stored in Postgres. Replacing or revoking a link invalidates previous links without removing existing members.
