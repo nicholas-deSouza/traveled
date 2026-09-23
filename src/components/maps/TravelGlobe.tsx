@@ -47,6 +47,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
 
   useEffect(() => {
     if (!container.current) return;
+    const pageDocument = container.current.ownerDocument;
     const map = new maplibregl.Map({
       container: container.current,
       style: mapStyle,
@@ -135,10 +136,11 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     element.addEventListener('wheel', delayRotation, { passive: true });
     element.addEventListener('keydown', delayRotation);
     window.addEventListener('focus', windowFocused);
+    pageDocument.addEventListener('visibilitychange', windowFocused);
     const rotate = (now: number) => {
       const elapsed = previous ? Math.min((now - previous) / 1000, 0.25) : 0;
       previous = now;
-      if (map.isStyleLoaded() && !media.matches && !pausedRef.current && !interacting && now >= resumeAt && !map.isMoving()) {
+      if (!pageDocument.hidden && map.isStyleLoaded() && !media.matches && !pausedRef.current && !interacting && now >= resumeAt && !map.isMoving()) {
         const center = map.getCenter();
         map.jumpTo({ center: [center.lng + elapsed * 2, center.lat] });
       }
@@ -182,6 +184,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
       element.removeEventListener('wheel', delayRotation);
       element.removeEventListener('keydown', delayRotation);
       window.removeEventListener('focus', windowFocused);
+      pageDocument.removeEventListener('visibilitychange', windowFocused);
       map.remove();
     };
   }, [trips, photos]);

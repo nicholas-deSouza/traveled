@@ -1,30 +1,15 @@
-# Staged change review
+# Pre-commit tests
 
-Enable for this clone with `git config --local core.hooksPath .githooks`.
-The hook requires Node.js and an authenticated Codex CLI with access to
-`gpt-5.6-terra` and support for `exec --ephemeral --ignore-user-config`.
-It looks for `codex` on PATH, then the CLI bundled with `ChatGPT.app` in
-`/Applications` or `~/Applications`. Set `CODEX_BIN` to an executable path to
-override discovery (for example, for a custom app installation).
+Enable for a new clone with `git config --local core.hooksPath .githooks`.
+Install dependencies with `pnpm install` first. Node.js and pnpm must be on PATH.
 
-Every `git commit` with staged changes starts a fresh, ephemeral Terra session.
-Only the staged diff and a fixed review prompt are supplied; no conversation is
-resumed or forked. The reviewer runs from a temporary directory in read-only mode,
-with user configuration and exec rules disabled, and is instructed not to use tools.
-It does not receive the repository's unstaged files or previous agent explanations.
+Every commit runs `pnpm test` from the repository root. This checks that each
+component has an adjacent `.test.tsx` file, runs all Vitest tests once, and runs
+all Node script tests. Any failure blocks the commit. Tests run against the
+working tree, including unstaged edits; stage the tested changes before committing.
 
-The commit waits for review (up to five minutes). Findings, CLI failures, malformed
-reports, and index changes during review block the commit. An empty index skips
-review. Interactive terminals show a spinner and elapsed time; redirected output
-shows plain progress messages. A green success line continues the commit; a red
-blocked heading displays numbered findings with severity, location, and explanation.
-Colors respect `NO_COLOR`; non-interactive and dumb terminals use plain output.
-Raw agent output is saved to a temporary diagnostic log instead of printed. Its
-path is shown only when review cannot complete. Reports and logs are retained
-for inspection and subject to the OS's temporary-file cleanup.
-Sensitive filenames such as `.env` and private key files are rejected before diff
-contents are read. This filename check is not a general secret scanner.
+The hook does not run an agent review. `scripts/review-staged.mjs` remains
+available for optional manual reviews. Git's `--no-verify` bypasses the hook.
 
-The review is limited to the provided diff and may miss issues requiring broader
-repository context or binary file inspection. Normal Git `--no-verify` bypasses the
-hook when explicitly needed. This hook runs on commit, not when files are staged.
+Database policy tests require a disposable PostgreSQL database and remain a
+separate integration check; see README.md. They are not run by this local hook.

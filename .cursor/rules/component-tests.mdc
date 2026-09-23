@@ -1,0 +1,11 @@
+---
+description: Add behavior tests alongside every React component
+globs: src/**/*.tsx
+alwaysApply: false
+---
+
+- Create an adjacent `<name>.test.tsx` whenever adding a component, page, or App component. Only `src/main.tsx` and `src/test/` helpers are exempt.
+- Use Vitest and React Testing Library. Test accessible output and user interactions, including relevant failure and loading states.
+- Mock external services at the existing Supabase/data boundary and mock MapLibre. Never require credentials or load `.env` files.
+- Example: `src/components/ui/button.tsx` is paired with `src/components/ui/button.test.tsx`.
+- Run `pnpm test`, `pnpm lint`, and `pnpm build` for relevant changes. The pre-commit hook runs the full local test suite.

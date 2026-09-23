@@ -22,10 +22,11 @@ function fixture(configuredStyle) {
   const element = target();
   const media = { ...target(), matches: false };
   const document = { ...target(), hidden: false };
+  element.ownerDocument = document;
   const window = { ...target(), matchMedia: () => media };
   let now = 1000, callback, cleanup, longitude = 0, removed = false, moving = false, style;
   const map = {
-    addControl() {}, on() {}, isStyleLoaded: () => true,
+    addControl() {}, on() {}, off() {}, isStyleLoaded: () => true,
     isMoving: () => moving, getCenter: () => ({ lng: longitude, lat: 30 }),
     jumpTo: ({ center }) => { longitude = center[0]; }, remove: () => { removed = true; },
   };
@@ -39,12 +40,20 @@ function fixture(configuredStyle) {
       if (name === 'react/jsx-runtime') return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
       if (name === 'maplibre-gl') return { default: { Map: function (options) { style = options.style; return map; }, NavigationControl: function () {} } };
       if (name.includes('button')) return { Button: 'button' };
-      if (name.includes('domain')) return { demoTrips: [] };
+      if (name === '../../lib/groups') return { downloadPhoto: async () => { throw new Error('Unexpected download'); } };
+      if (name === '../../lib/globeData') return { photoPoints: () => ({ photos: [], data: { type: 'FeatureCollection', features: [] } }), markerOffsets: () => new Map() };
+      if (name === '../../lib/thumbnailCache') return { thumbnailCache: () => ({ setVisible() {}, dispose() {} }) };
+      if (name === '../../lib/tripColor') return { tripColor: () => '#123456' };
       throw new Error(name);
     },
   });
-  const tree = exports.TravelGlobe();
-  const toggle = tree.props.children[1].props.children[0].props.onClick;
+  const tree = exports.TravelGlobe({ trips: [], photos: [] });
+  function findButton(node) {
+    if (!node || typeof node !== 'object') return undefined;
+    if (node.type === 'button' && node.props.children === 'Pause rotation') return node;
+    return [node.props?.children].flat().map(findButton).find(Boolean);
+  }
+  const toggle = findButton(tree).props.onClick;
   function tick(ms = 16) { now += ms; callback?.(now); }
   tick();
   return { element, window, document, media, style, toggle, tick, cleanup: () => cleanup(), longitude: () => longitude, removed: () => removed, running: () => Boolean(callback), setMoving: value => { moving = value; } };
