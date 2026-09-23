@@ -31,7 +31,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     const updateThumbnails = () => {
       if (!map.isStyleLoaded()) return;
       const visible = new Map<string, { coordinates: [number, number]; path: string; title: string; tripId: string; color: string; count: number; x: number; y: number }>();
-      if (map.getZoom() >= 3) {
+      if (map.getZoom() >= 5) {
         for (const { trip, id, points } of datasets) {
           if (!map.getLayer(id)) continue;
           // Rendered features exclude the far side of the globe and offscreen tiles.
