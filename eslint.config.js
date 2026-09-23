@@ -3,42 +3,12 @@ import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
-
-const domAccessMessage = "Use React state, JSX, and refs instead of querying or manually modifying the DOM.";
-const restrictedDomProperties = [
-  "document",
-  "querySelector",
-  "querySelectorAll",
-  "getElementById",
-  "getElementsByClassName",
-  "getElementsByTagName",
-  "getElementsByTagNameNS",
-  "getElementsByName",
-  "createElementNS",
-  "createTextNode",
-  "createDocumentFragment",
-  "innerHTML",
-  "outerHTML",
-  "innerText",
-  "textContent",
-  "insertAdjacentHTML",
-  "insertAdjacentElement",
-  "insertAdjacentText",
-  "appendChild",
-  "removeChild",
-  "replaceChild",
-  "replaceChildren",
-  "insertBefore",
-  "setAttribute",
-  "removeAttribute",
-  "toggleAttribute",
-  "classList",
-];
+import noDirectDom from "./eslint-rules/no-direct-dom.mjs";
 
 export default tseslint.config(
   { ignores: ["dist", "supabase"] },
   {
-    files: [".github/scripts/**/*.mjs"],
+    files: [".github/scripts/**/*.mjs", "eslint-rules/**/*.mjs"],
     extends: [js.configs.recommended],
     languageOptions: { ecmaVersion: 2022, globals: globals.node },
   },
@@ -50,11 +20,15 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-      "no-restricted-globals": ["error", { name: "document", message: domAccessMessage }],
-      "no-restricted-properties": [
-        "error",
-        ...restrictedDomProperties.map((property) => ({ property, message: domAccessMessage })),
-      ],
+    },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    languageOptions: { parserOptions: { project: "./tsconfig.app.json", tsconfigRootDir: import.meta.dirname } },
+    plugins: { local: { rules: { "no-direct-dom": noDirectDom } } },
+    rules: {
+      "no-restricted-globals": ["error", { name: "document", message: "Use React state, JSX, and refs instead of direct document access." }],
+      "local/no-direct-dom": "error",
     },
   },
 );

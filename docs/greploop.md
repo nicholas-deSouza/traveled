@@ -150,7 +150,7 @@ as well if your organization requires all actions to be immutable.
 - **Attempt already used:** inspect that attempt's run and candidate artifact.
   Failed attempts are not silently retried. Fix the blocker and push a new
   reviewed commit; raise the PR budget deliberately if it has been exhausted.
-- **No patch / forbidden file / failing validation:** inspect the logs. The loop
+- **Needs maintainer attention / failed validation:** inspect the updated attempt comment and linked logs. The loop
   stops rather than pushing an unvalidated patch. Download `greploop-report` for
   `codex-result.json` when Codex completed; a successfully exported candidate also contains
   `result.json` with Codex's summary and remaining issues. Candidate/input
@@ -177,3 +177,24 @@ Greptile installation's payload format, credentials, and repository protections.
 References: [Codex GitHub Action](https://developers.openai.com/codex/github-action/),
 [Greptile configuration](https://www.greptile.com/docs/code-review/greptile-config-reference),
 [GitHub workflow triggers](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+## Visible run status
+
+The attempt reservation comment starts with **Greploop: Running** and explains
+why the new commit needs another attempt: its confidence score is below 5/5,
+unresolved review threads remain, or both. The same comment is updated when the
+run finishes, needs maintainer attention, fails, or is cancelled. The workflow
+link is authoritative if cancellation prevents the reporting job from running.
+
+No source changes or a proposed patch outside the source allowlist now produce a
+**Needs maintainer attention** report, including the reason and Codex's remaining
+issues. Validation and publishing are skipped. Configuration changes (including
+`eslint.config.js`) still require a maintainer; this reporting change does not
+expand the publisher's permissions. Other job failures also produce a status
+update with a link to the failure logs.
+
+A separate, deduplicated decision comment explains why intake did not start a new
+attempt (already attempted commit, completed review, or exhausted budget). It does
+not overwrite an active attempt's status. Failed, blocked, and cancelled attempts
+remain consumed. Fix the blocker and push a new commit for Greptile to review;
+a fresh dispatch of an already-attempted SHA will not retry it.

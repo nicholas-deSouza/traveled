@@ -66,6 +66,8 @@ jobs:
           retention-days: 7
 
   fix:
+    outputs:
+      patch: ${{ steps.export.outputs.patch }}
     needs: intake
     if: needs.intake.outputs.run == 'true'
     runs-on: ubuntu-latest
@@ -114,6 +116,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Export source patch
+        id: export
         env:
           REVIEW_SHA: ${{ needs.intake.outputs.sha }}
         run: >-
@@ -127,6 +130,7 @@ jobs:
 
   validate:
     needs: [intake, fix]
+    if: needs.fix.outputs.patch == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -230,3 +234,49 @@ jobs:
             });
             await resolveAddressed({ github }, snapshot, result.addressedThreadIds);
             await core.summary.addRaw('Validated fix pushed. Greptile and CI will review the new commit. Merge remains manual.').write();
+
+  report:
+    needs: [intake, fix, validate, publish]
+    if: always() && needs.intake.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: write
+    steps:
+      # Only trusted controller code runs with the comment-writing token.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.intake.outputs.controller }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        id: candidate
+        continue-on-error: true
+        with:
+          name: greploop-candidate
+          path: candidate
+      - uses: actions/download-artifact@v4
+        if: steps.candidate.outcome != 'success'
+        continue-on-error: true
+        with:
+          name: greploop-report
+          path: report
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          SNAPSHOT: ${{ needs.intake.outputs.snapshot }}
+          JOBS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const { readFileSync, existsSync } = await import('node:fs');
+            const { finishAttempt } = await import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/greploop.mjs`);
+            const path = ['candidate/result.json', 'report/codex-result.json'].find(existsSync);
+            let result = {};
+            if (path) {
+              try { result = JSON.parse(readFileSync(path, 'utf8')); }
+              catch { core.warning('Could not parse the Codex report; see job logs.'); }
+            }
+            const needs = JSON.parse(process.env.JOBS);
+            const jobs = Object.fromEntries(Object.entries(needs).map(([name, job]) => [name, job.result]));
+            await finishAttempt({ github, context, core }, JSON.parse(process.env.SNAPSHOT), jobs, result);
