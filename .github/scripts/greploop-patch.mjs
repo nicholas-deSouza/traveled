@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -48,7 +48,17 @@ export function run(mode, directory, sha, snapshotFile, resultFile, artifactDire
       ...split(git('diff', 'HEAD', '--name-only', '-z', '--no-renames')),
       ...split(git('ls-files', '--others', '--exclude-standard', '-z')),
     ])];
-    if (paths.length === 0 || paths.some((path) => !allowedPath(path))) throw new Error('No changes or changes outside the permitted source scope.');
+    if (paths.length === 0 || paths.some((path) => !allowedPath(path))) {
+      const result = JSON.parse(readFileSync(resultPath, 'utf8'));
+      validateResult(result, snapshot, paths);
+      const reason = paths.length === 0
+        ? 'Codex produced no source changes. A maintainer must address the remaining issues before a new reviewed commit can start another attempt.'
+        : `The proposed patch contains files outside the permitted source scope: ${paths.filter((path) => !allowedPath(path)).join(', ')}. A maintainer must handle these changes.`;
+      mkdirSync(artifact, { recursive: true });
+      writeFileSync(resolve(artifact, 'result.json'), JSON.stringify({ ...result, reason }));
+      if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'patch=false\n');
+      return;
+    }
     git('add', '--', ...paths);
     checkStaged();
     const patch = git('diff', '--cached', '--binary', '--no-ext-diff', '--no-renames');
@@ -58,6 +68,7 @@ export function run(mode, directory, sha, snapshotFile, resultFile, artifactDire
     mkdirSync(artifact, { recursive: true });
     writeFileSync(resolve(artifact, 'fix.patch'), patch);
     writeFileSync(resolve(artifact, 'result.json'), JSON.stringify(result));
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'patch=true\n');
   } else if (mode === 'apply') {
     const patchPath = resolve(artifact, 'fix.patch');
     if (readFileSync(patchPath).length > 1024 * 1024) throw new Error('Patch exceeds 1 MiB.');

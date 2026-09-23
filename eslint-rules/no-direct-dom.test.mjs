@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { ESLint } from 'eslint';
+import tseslint from 'typescript-eslint';
+import rule from './no-direct-dom.mjs';
+
+const eslint = new ESLint({
+  overrideConfigFile: true,
+  overrideConfig: [{
+    files: ['**/*.tsx'],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        project: './tsconfig.app.json',
+        tsconfigRootDir: process.cwd(),
+        // Each test supplies new in-memory content for the same filename. CI's
+        // immutable single-run program would reuse disk content and stale types.
+        disallowAutomaticSingleRunInference: true,
+      },
+    },
+    plugins: { local: { rules: { 'no-direct-dom': rule } } },
+    rules: { 'local/no-direct-dom': 'error' },
+  }],
+});
+
+for (const code of [
+  'declare const element: HTMLElement; element.querySelector("button");',
+  'declare const element: HTMLElement; element["querySelectorAll"]("button");',
+  'declare const ref: { current: HTMLDialogElement | null }; ref.current?.querySelector("button");',
+  'declare const element: HTMLElement; const { querySelector } = element;',
+  'declare const element: HTMLElement; element.textContent = "new";',
+  'declare const element: HTMLElement; element["inner" + "HTML"] = "new";',
+  'declare const element: HTMLElement; const key = "innerHTML"; element[key] = "new";',
+  'declare const element: HTMLElement; let key = "innerHTML"; element[key] = "new";',
+  'declare const element: HTMLElement; declare const key: string; element[key];',
+  'declare const element: HTMLElement; declare const key: "innerHTML" | "textContent"; element[key] = "new";',
+  'declare const element: HTMLElement; declare const key: "innerHTML" | "focus"; element[key];',
+  'declare const element: HTMLElement; element[`inner${"HTML"}`] = "new";',
+  'declare const element: HTMLElement; const { ["query" + "Selector"]: query } = element;',
+  'window["docu" + "ment"];',
+  'window.document;',
+  'globalThis.document;',
+]) {
+  test(`rejects DOM access: ${code}`, async () => {
+    const [result] = await eslint.lintText(code, { filePath: 'src/main.tsx' });
+    assert.equal(result.messages.length, 1, JSON.stringify(result.messages));
+    assert.equal(result.messages[0].ruleId, 'local/no-direct-dom');
+  });
+}
+
+for (const code of [
+  'declare const element: HTMLElement; element["fo" + "cus"]();',
+  'declare const element: HTMLElement; element[`fo${"cus"}`]();',
+  'declare const element: HTMLElement; declare const key: "focus" | "blur"; element[key]();',
+  'declare const element: HTMLElement; declare const key: symbol; element[key];',
+  'declare const custom: Record<string, string>; declare const key: string; custom[key];',
+  'const custom = { innerHTML: "value" }; custom["inner" + "HTML"];',
+  'const record = { textContent: "value", document: "file" }; record.textContent; record.document;',
+  'const service = { querySelector: (s: string) => s }; service.querySelector("item");',
+  'declare const custom: { setAttribute(s: string): void }; custom.setAttribute("x");',
+  'declare const custom: { querySelector: string }; const { querySelector } = custom;',
+  'declare const ref: { current: HTMLDialogElement | null }; ref.current?.showModal(); ref.current?.focus();',
+]) {
+  test(`allows non-DOM APIs or supported ref operations: ${code}`, async () => {
+    const [result] = await eslint.lintText(code, { filePath: 'src/main.tsx' });
+    assert.deepEqual(result.messages, []);
+  });
+}

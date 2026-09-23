@@ -27,6 +27,6 @@ jobs:
           node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node --test .github/scripts/greploop.test.mjs
+      - run: node --test .github/scripts/greploop.test.mjs eslint-rules/no-direct-dom.test.mjs
       - run: pnpm lint
       - run: pnpm build
