@@ -54,9 +54,9 @@ export function TripPhotos({ tripId, title }: { tripId: string; title: string })
       })}
     </div>
     {(page > 0 || data?.hasMore) && <nav className="mt-4 flex items-center gap-4" aria-label="Photo pages">
-      <Button variant="outline" disabled={page === 0 || loading} onClick={() => setPage(value => value - 1)}>Previous photos</Button>
+      <Button variant="outline" disabled={page === 0 || loading || busy} onClick={() => setPage(value => value - 1)}>Previous photos</Button>
       <span className="text-sm" aria-live="polite">Page {page + 1}</span>
-      <Button variant="outline" disabled={!data?.hasMore || loading} onClick={() => setPage(value => value + 1)}>Next photos</Button>
+      <Button variant="outline" disabled={!data?.hasMore || loading || busy} onClick={() => setPage(value => value + 1)}>Next photos</Button>
     </nav>}
     {viewer && <Modal label={viewer.label} onClose={() => setViewer(null)}>
       <div onClick={event => { if (event.target === event.currentTarget) setViewer(null); }} className="flex max-w-[calc(100vw-2rem)] flex-col items-center gap-3 text-white">

@@ -28,7 +28,7 @@ function fixture({ download = async path => ({ data: { path }, error: null }), p
   const exports = {};
   vm.runInNewContext(compiled, {
     exports,
-    require(name) { assert.equal(name, './supabase'); return { supabase: db }; },
+    require(name) { if (name === './photoMetadata') return {}; assert.equal(name, './supabase'); return { supabase: db }; },
     URL: { createObjectURL: blob => `blob:${blob.path}`, revokeObjectURL: url => calls.revoked.push(url) },
   });
   return { api: exports, calls };

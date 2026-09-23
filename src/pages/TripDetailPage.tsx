@@ -6,6 +6,7 @@ import { errorMessage, loadTrip, uploadPhoto } from '../lib/groups';
 import { useResource } from '../lib/useResource';
 import { useSession } from '../lib/useSession';
 
+import { TripColorPicker } from '../components/photos/TripColorPicker';
 import { TripPhotos } from '../components/photos/TripPhotos';
 
 export function TripDetailPage() {
@@ -45,6 +46,7 @@ function TripContent({ tripId }: { tripId: string }) {
   if (loading) return <p className="py-12" role="status">Loading trip…</p>;
   if (error || !data) return <div className="py-12"><p role="alert">{error}</p><Button onClick={reload} variant="outline" className="mt-4">Retry</Button><Link to="/groups" className="ml-4 underline">Your groups</Link></div>;
   return <div className="py-8"><Link className="text-sm text-moss hover:underline" to={`/groups/${data.group.id}`}>← {data.group.name}</Link><h1 className="mt-4 break-words font-display text-5xl">{data.trip.title}</h1><p className="mt-3 text-ink/65">{data.trip.starts_on || 'No dates set'}{data.trip.ends_on ? ` → ${data.trip.ends_on}` : ''} · Only group members</p>{data.trip.description && <p className="mt-3 break-words">{data.trip.description}</p>}
+    <TripColorPicker trip={data.trip} canEdit={data.trip.created_by === user.id} />
     <Card className="mt-8 p-5"><form onSubmit={upload} className="flex flex-wrap items-end gap-4"><label className="block text-sm font-medium">Add photos<input type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" disabled={busy} onChange={event => setFiles(Array.from(event.target.files ?? []))} className="mt-2 block max-w-full rounded-lg text-sm file:mr-3 file:rounded-full file:border-0 file:bg-sand file:px-4 file:py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ember" /><span className="mt-2 block text-xs text-ink/60">JPEG, PNG, WebP, or GIF. Up to 20 MB per photo.</span></label><Button disabled={busy || !files.length}>{busy ? 'Uploading…' : `Upload${files.length ? ` ${files.length} photos` : ' photos'}`}</Button></form></Card>
     {message && <p className="mt-4 text-sm" role="status">{message}</p>}{uploadError && <p className="mt-4 text-sm text-red-700" role="alert">{uploadError}</p>}
     <TripPhotos key={photoRevision} tripId={tripId} title={data.trip.title} />
