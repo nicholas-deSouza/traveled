@@ -203,17 +203,3 @@ export async function downloadPhoto(path: string): Promise<Blob> {
   if (error || !data) throw error ?? new Error('Photo unavailable.');
   return data;
 }
-
-export async function deletePhoto(photoId: string, userId: string) {
-  const db = client();
-  // Fetch the canonical path and owner rather than trusting a UI-supplied path.
-  const { data: photo, error: readError } = await db.from('photos')
-    .select('id, uploaded_by, storage_path').eq('id', photoId).single();
-  if (readError || !photo) throw readError ?? new Error('Photo unavailable.');
-  if (photo.uploaded_by !== userId) throw new Error('You can only delete your own photos.');
-  const { error: storageError } = await db.storage.from('trip-photos').remove([photo.storage_path]);
-  // A retry may find that the original object was already removed.
-  if (storageError && !('statusCode' in storageError && String(storageError.statusCode) === '404')) throw storageError;
-  const { data, error } = await db.from('photos').delete().eq('id', photoId).eq('uploaded_by', userId).select('id');
-  if (error || !data?.length) throw new Error('The file was removed, but its photo record could not be deleted. Retry deletion to finish.');
-}

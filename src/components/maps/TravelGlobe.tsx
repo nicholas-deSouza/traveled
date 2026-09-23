@@ -1,23 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { Button } from "../ui/button";
-import { demoTrips } from "../../types/domain";
+import type { Atlas } from '../../lib/groups';
+import { photoPoints } from '../../lib/globeData';
+import { tripColor } from '../../lib/tripColor';
 
 // Liberty is an OSM vector style with administrative boundaries and place labels.
 // A custom production style can replace it via VITE_MAP_STYLE_URL.
 const mapStyle = import.meta.env.VITE_MAP_STYLE_URL?.trim() || "https://tiles.openfreemap.org/styles/liberty";
 
-export function TravelGlobe() {
+export function TravelGlobe({ trips, photos }: Atlas) {
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const pausedRef = useRef(false);
   const container = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const styleReady = useRef(false);
-  const [generation, setGeneration] = useState(0);
-  const [ready, setReady] = useState(0);
-  const [error, setError] = useState('');
-  const navigate = useNavigate();
 
   useEffect(() => {
     if (!container.current) return;
@@ -71,20 +67,30 @@ export function TravelGlobe() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.on("style.load", () => {
       map.setProjection({ type: "globe" });
-      map.addSource("trips", { type: "geojson", data: { type: "FeatureCollection", features: demoTrips.map((trip) => ({ type: "Feature", properties: { title: trip.title, photos: trip.photoCount }, geometry: { type: "Point", coordinates: [trip.longitude, trip.latitude] } })) } });
-      map.addLayer({ id: "trip-rings", type: "circle", source: "trips", paint: { "circle-radius": 13, "circle-color": "#E06C47", "circle-opacity": 0.18 } });
-      map.addLayer({ id: "trip-points", type: "circle", source: "trips", paint: { "circle-radius": 6, "circle-color": "#E06C47", "circle-stroke-width": 2, "circle-stroke-color": "#FFF" } });
-      map.on("click", "trip-points", (event) => {
-        const feature = event.features?.[0];
-        if (!feature?.geometry || feature.geometry.type !== "Point") return;
-        new maplibregl.Popup({ closeButton: false, offset: 12 }).setLngLat(feature.geometry.coordinates as [number, number]).setHTML(`<strong>Sample trip: ${feature.properties?.title}</strong><br/>${feature.properties?.photos} sample photos`).addTo(map);
-      });
-      map.addLayer({ id, type: 'circle', source: id, paint: {
-        'circle-radius': 6, 'circle-color': tripColor(trip), 'circle-stroke-color': '#fff', 'circle-stroke-width': 2,
-        'circle-opacity': ['step', ['zoom'], 1, THUMBNAIL_ZOOM, 0],
-        'circle-stroke-opacity': ['step', ['zoom'], 1, THUMBNAIL_ZOOM, 0],
-      } });
-      return { id, trip, photos: points.photos };
+      for (const trip of trips) {
+        const id = `trip-${trip.id}`;
+        const points = photoPoints(photos.filter(photo => photo.trip_id === trip.id));
+        map.addSource(id, { type: 'geojson', data: points.data });
+        map.addLayer({ id, type: 'circle', source: id, paint: {
+          'circle-radius': 7, 'circle-color': tripColor(trip),
+          'circle-stroke-color': '#fff', 'circle-stroke-width': 2,
+        } });
+        map.on('click', id, event => {
+          const feature = event.features?.[0];
+          if (feature?.geometry.type !== 'Point') return;
+          const content = document.createElement('div');
+          const link = document.createElement('a');
+          link.href = `/trips/${encodeURIComponent(trip.id)}`;
+          link.textContent = trip.title;
+          link.className = 'font-medium underline';
+          const count = document.createElement('p');
+          count.textContent = `${feature.properties?.count ?? 1} photos at this location`;
+          content.append(link, count);
+          new maplibregl.Popup({ offset: 12 })
+            .setLngLat(feature.geometry.coordinates as [number, number])
+            .setDOMContent(content).addTo(map);
+        });
+      }
     });
     return () => {
       cancelAnimationFrame(frame);
@@ -101,10 +107,10 @@ export function TravelGlobe() {
       document.removeEventListener('visibilitychange', visibilityChanged);
       map.remove();
     };
-  }, []);
+  }, [trips, photos]);
 
   return <div className="relative">
-    <div ref={container} aria-label="Interactive globe with sample trips" className="h-[460px] w-full overflow-hidden rounded-3xl bg-ink md:h-[620px]" />
+    <div ref={container} aria-label="Interactive globe with trip photo locations" className="h-[460px] w-full overflow-hidden rounded-3xl bg-ink md:h-[620px]" />
     <div className="absolute left-3 top-3 rounded-xl bg-white/95 p-2">
       <Button size="sm" variant="outline" disabled={reducedMotion} aria-pressed={paused || reducedMotion} onClick={() => {
         pausedRef.current = !pausedRef.current;

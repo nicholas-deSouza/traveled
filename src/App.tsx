@@ -15,9 +15,8 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
-        <Route path="/" element={<DashboardPage />} />
         <Route element={<RequireAuth />}>
-          {isSupabaseConfigured && <Route path="/" element={<DashboardPage />} />}
+          <Route path="/" element={<DashboardPage />} />
           <Route path="/groups" element={<GroupsPage />} />
           <Route path="/groups/:groupId" element={<GroupDetailPage />} />
           <Route path="/trips/:tripId" element={<TripDetailPage />} />
