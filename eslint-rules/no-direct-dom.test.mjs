@@ -8,7 +8,16 @@ const eslint = new ESLint({
   overrideConfigFile: true,
   overrideConfig: [{
     files: ['**/*.tsx'],
-    languageOptions: { parser: tseslint.parser, parserOptions: { project: './tsconfig.app.json', tsconfigRootDir: process.cwd() } },
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        project: './tsconfig.app.json',
+        tsconfigRootDir: process.cwd(),
+        // Each test supplies new in-memory content for the same filename. CI's
+        // immutable single-run program would reuse disk content and stale types.
+        disallowAutomaticSingleRunInference: true,
+      },
+    },
     plugins: { local: { rules: { 'no-direct-dom': rule } } },
     rules: { 'local/no-direct-dom': 'error' },
   }],
