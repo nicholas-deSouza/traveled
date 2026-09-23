@@ -1,9 +1,13 @@
 import { supabase } from './supabase';
+import { extractLocation, type Coordinates } from './photoMetadata';
 
 export type Group = { id: string; name: string; created_by: string };
-export type Trip = { id: string; group_id: string; title: string; description: string | null; starts_on: string | null; ends_on: string | null };
+export type Trip = { id: string; group_id: string; created_by: string; color: string | null; title: string; description: string | null; starts_on: string | null; ends_on: string | null };
 export type Member = { user_id: string; role: 'owner' | 'member'; profiles: { display_name: string | null } | null };
-export type Photo = { id: string; storage_path: string; uploaded_by: string; url: string | null };
+export type PhotoMetadata = Coordinates & { id: string; trip_id: string; storage_path: string; uploaded_by: string };
+export type Photo = PhotoMetadata & { url: string | null };
+export type AtlasTrip = Trip & { groupName: string; photoCount: number };
+export type Atlas = { trips: AtlasTrip[]; photos: PhotoMetadata[] };
 
 function client() {
   if (!supabase) throw new Error('Connect Supabase to use groups.');
@@ -83,7 +87,7 @@ export async function loadTripPhotos(id: string, page = 0) {
   const start = page * PHOTO_PAGE_SIZE;
   // One extra metadata row indicates a next page without downloading that photo.
   const { data: rows, error } = await db.from('photos')
-    .select('id, storage_path, uploaded_by').eq('trip_id', id)
+    .select('id, trip_id, storage_path, uploaded_by, latitude, longitude').eq('trip_id', id)
     .order('created_at', { ascending: false }).order('id', { ascending: false })
     .range(start, start + PHOTO_PAGE_SIZE);
   if (error) throw error;
@@ -111,13 +115,72 @@ export async function uploadPhoto(trip: Trip, userId: string, file: File) {
   const extension = extensions[file.type];
   if (!extension || file.size > 20 * 1024 * 1024) throw new Error(`${file.name}: choose a JPEG, PNG, WebP, or GIF under 20 MB.`);
   const db = client();
+  const location = await extractLocation(file);
   const path = `${trip.group_id}/${trip.id}/${crypto.randomUUID()}.${extension}`;
   const { error } = await db.storage.from('trip-photos').upload(path, file, { contentType: file.type });
   if (error) throw error;
-  const { error: photoError } = await db.from('photos').insert({ trip_id: trip.id, uploaded_by: userId, storage_path: path });
+  const { error: photoError } = await db.from('photos').insert({ trip_id: trip.id, uploaded_by: userId, storage_path: path, ...location });
   if (photoError) {
     const { error: cleanupError } = await db.storage.from('trip-photos').remove([path]);
     if (cleanupError) throw new Error(`${errorMessage(photoError)} The file could not be cleaned up; please contact the group owner.`);
     throw photoError;
   }
+}
+
+// Metadata only: never download the entire atlas's original images.
+async function allRows<T>(table: string, columns: string): Promise<T[]> {
+  const rows: T[] = [];
+  const size = 500;
+  for (let start = 0; ; start += size) {
+    const { data, error } = await client().from(table).select(columns)
+      .order('id').range(start, start + size - 1);
+    if (error) throw error;
+    rows.push(...data as T[]);
+    if (data.length < size) return rows;
+  }
+}
+
+export async function loadAtlas(): Promise<Atlas> {
+  const [trips, groups, photos] = await Promise.all([
+    allRows<Trip & { created_at: string }>('trips', 'id, group_id, created_by, color, title, description, starts_on, ends_on, created_at'),
+    allRows<Group>('groups', 'id, name, created_by'),
+    allRows<PhotoMetadata>('photos', 'id, trip_id, storage_path, uploaded_by, latitude, longitude'),
+  ]);
+  const groupNames = new Map(groups.map(group => [group.id, group.name]));
+  const visibleTrips = trips.filter(trip => groupNames.has(trip.group_id));
+  const ids = new Set(visibleTrips.map(trip => trip.id));
+  const visiblePhotos = photos.filter(photo => ids.has(photo.trip_id));
+  const counts = new Map<string, number>();
+  visiblePhotos.forEach(photo => counts.set(photo.trip_id, (counts.get(photo.trip_id) ?? 0) + 1));
+  return {
+    trips: visibleTrips.sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))
+      .map(trip => ({ ...trip, groupName: groupNames.get(trip.group_id)!, photoCount: counts.get(trip.id) ?? 0 })),
+    photos: visiblePhotos,
+  };
+}
+
+export async function updateTripColor(tripId: string, color: string) {
+  if (!/^#[0-9a-f]{6}$/i.test(color)) throw new Error('Choose a valid six-digit color.');
+  const { data, error } = await client().from('trips').update({ color }).eq('id', tripId).select('id').single();
+  if (error || !data) throw error ?? new Error('This trip could not be updated.');
+}
+
+export async function downloadPhoto(path: string): Promise<Blob> {
+  const { data, error } = await client().storage.from('trip-photos').download(path);
+  if (error || !data) throw error ?? new Error('Photo unavailable.');
+  return data;
+}
+
+export async function deletePhoto(photoId: string, userId: string) {
+  const db = client();
+  // Fetch the canonical path and owner rather than trusting a UI-supplied path.
+  const { data: photo, error: readError } = await db.from('photos')
+    .select('id, uploaded_by, storage_path').eq('id', photoId).single();
+  if (readError || !photo) throw readError ?? new Error('Photo unavailable.');
+  if (photo.uploaded_by !== userId) throw new Error('You can only delete your own photos.');
+  const { error: storageError } = await db.storage.from('trip-photos').remove([photo.storage_path]);
+  // A retry may find that the original object was already removed.
+  if (storageError && !('statusCode' in storageError && String(storageError.statusCode) === '404')) throw storageError;
+  const { data, error } = await db.from('photos').delete().eq('id', photoId).eq('uploaded_by', userId).select('id');
+  if (error || !data?.length) throw new Error('The file was removed, but its photo record could not be deleted. Retry deletion to finish.');
 }

@@ -16,8 +16,9 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
-        <Route path="/" element={isSupabaseConfigured ? <Navigate to="/groups" replace /> : <DashboardPage />} />
+        {!isSupabaseConfigured && <Route path="/" element={<div className="py-12"><h1 className="font-display text-4xl">Connect your shared atlas</h1><p className="mt-3">Set up Supabase and apply the database migrations to see your trips. Follow README for local setup.</p></div>} />}
         <Route element={<RequireAuth />}>
+          {isSupabaseConfigured && <Route path="/" element={<DashboardPage />} />}
           <Route path="/groups" element={<GroupsPage />} />
           <Route path="/groups/:groupId" element={<GroupDetailPage />} />
           <Route path="/trips/:tripId" element={<TripDetailPage />} />
