@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { TravelGlobe } from '../components/maps/TravelGlobe';
 import { Button } from '../components/ui/button';
@@ -14,6 +15,20 @@ const emptyPhotos: Atlas['photos'] = [];
 export function DashboardPage() {
   const { user } = useSession();
   const { data, loading, error, reload } = useResource(user.id, loadAtlas);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(timer);
+      if (!document.hidden) timer = setTimeout(reload, 100);
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [reload]);
   const trips = data?.trips ?? emptyTrips;
   const photos = data?.photos ?? emptyPhotos;
   return (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { errorMessage } from "./groups";
 
 // Stable loaders and optional disposal keep route changes from showing stale data.
@@ -8,6 +8,7 @@ export function useResource<T>(
   dispose?: (value: T) => void,
 ) {
   const [revision, setRevision] = useState(0);
+  const reload = useCallback(() => setRevision((value) => value + 1), []);
   const [result, setResult] = useState<{
     key: string;
     revision: number;
@@ -39,6 +40,6 @@ export function useResource<T>(
     data: current?.data,
     error: current?.error,
     loading: !current,
-    reload: () => setRevision((value) => value + 1),
+    reload,
   };
 }
