@@ -247,17 +247,17 @@ jobs:
       pull-requests: write
     steps:
       # Only trusted controller code runs with the comment-writing token.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ needs.intake.outputs.controller }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         id: candidate
         continue-on-error: true
         with:
           name: greploop-candidate
           path: candidate
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: steps.candidate.outcome != 'success'
         continue-on-error: true
         with:

@@ -20,6 +20,15 @@ for (const code of [
   'declare const ref: { current: HTMLDialogElement | null }; ref.current?.querySelector("button");',
   'declare const element: HTMLElement; const { querySelector } = element;',
   'declare const element: HTMLElement; element.textContent = "new";',
+  'declare const element: HTMLElement; element["inner" + "HTML"] = "new";',
+  'declare const element: HTMLElement; const key = "innerHTML"; element[key] = "new";',
+  'declare const element: HTMLElement; let key = "innerHTML"; element[key] = "new";',
+  'declare const element: HTMLElement; declare const key: string; element[key];',
+  'declare const element: HTMLElement; declare const key: "innerHTML" | "textContent"; element[key] = "new";',
+  'declare const element: HTMLElement; declare const key: "innerHTML" | "focus"; element[key];',
+  'declare const element: HTMLElement; element[`inner${"HTML"}`] = "new";',
+  'declare const element: HTMLElement; const { ["query" + "Selector"]: query } = element;',
+  'window["docu" + "ment"];',
   'window.document;',
   'globalThis.document;',
 ]) {
@@ -31,6 +40,12 @@ for (const code of [
 }
 
 for (const code of [
+  'declare const element: HTMLElement; element["fo" + "cus"]();',
+  'declare const element: HTMLElement; element[`fo${"cus"}`]();',
+  'declare const element: HTMLElement; declare const key: "focus" | "blur"; element[key]();',
+  'declare const element: HTMLElement; declare const key: symbol; element[key];',
+  'declare const custom: Record<string, string>; declare const key: string; custom[key];',
+  'const custom = { innerHTML: "value" }; custom["inner" + "HTML"];',
   'const record = { textContent: "value", document: "file" }; record.textContent; record.document;',
   'const service = { querySelector: (s: string) => s }; service.querySelector("item");',
   'declare const custom: { setAttribute(s: string): void }; custom.setAttribute("x");',

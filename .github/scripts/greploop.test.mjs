@@ -247,3 +247,13 @@ test('decision notices are updated and deduplicated without modifying attempt re
   assert.match(comments[0].body, /Running$/);
   assert.deepEqual(attemptsFrom(comments), [sha]);
 });
+
+
+test('write-capable reporting job uses only immutable action revisions', () => {
+  const workflow = readFileSync('.github/workflows/greploop.yml', 'utf8');
+  const report = workflow.match(/^ {2}report:\n([\s\S]*?)(?=^ {2}[a-z][\w-]*:\n|(?![\s\S]))/m)?.[1];
+  assert.ok(report, 'Reporting job must be present');
+  const actions = [...report.matchAll(/uses:\s*(\S+)/g)].map((match) => match[1]);
+  assert.ok(actions.length > 0);
+  for (const action of actions) assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/, `${action} must be pinned`);
+});
