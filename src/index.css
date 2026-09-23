@@ -18,3 +18,6 @@
 .atlas-photo img[hidden] { display: none; }
 .atlas-photo-fallback { font-size: 10px; }
 .atlas-photo-count { position: absolute; right: -9px; top: -12px; border: 2px solid white; border-radius: 999px; background: #24312c; color: white; padding: 1px 6px; font: 600 12px/20px sans-serif; }
+
+/* Lock scrolling while any native modal is open, including stacked dialogs. */
+body:has(dialog:modal) { overflow: hidden; }

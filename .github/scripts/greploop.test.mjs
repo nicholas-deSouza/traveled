@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { allowedPath, validateResult } from './greploop-patch.mjs';
-import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake } from './greploop.mjs';
+import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice } from './greploop.mjs';
 
 const sha = 'a'.repeat(40);
 const bot = { login: 'greptile-apps[bot]', type: 'Bot' };
@@ -128,11 +128,14 @@ test('intake collects paginated threads, reserves one attempt and ignores the du
     assert.equal(JSON.parse(outputs.snapshot).threads.length, 2);
     assert.equal(JSON.parse(outputs.snapshot).attempt, 1);
     assert.equal(comments.length, 2);
+    assert.match(comments[1].body, /Greploop: Running/);
+    assert.match(comments[1].body, /Starting because: Greptile confidence is 3\/5/);
     assert.match(readFileSync('prompt.md', 'utf8'), /Confidence Score/);
     delete outputs.run;
     await intake({ github, context, core });
     assert.equal(outputs.run, undefined);
-    assert.equal(comments.length, 2);
+    assert.equal(comments.length, 3);
+    assert.match(comments[2].body, /No new run started/);
   } finally {
     process.chdir(previous);
   }
@@ -165,4 +168,92 @@ test('patch exports and applies in a fresh checkout; deleted files are rejected'
   const another = join(temp, 'another');
   execFileSync('git', ['clone', '--quiet', source, another]);
   assert.throws(() => execFileSync(process.execPath, [script, 'apply', another, fixtureSha, snapshot, result, artifact], { stdio: 'pipe' }), /Only regular source-file/);
+});
+
+
+test('start reason includes score and unresolved findings, even at 5/5', () => {
+  assert.match(startReason({ score: 3, threads: [] }), /3\/5/);
+  const reason = startReason({ score: 5, threads: [{ id: 't' }] });
+  assert.match(reason, /1 unresolved/);
+  assert.doesNotMatch(reason, /confidence/);
+});
+
+test('final status updates the reservation for blocked, failed, cancelled and published attempts', async () => {
+  const snapshot = { number: 9, sha, attempt: 1 };
+  const context = { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com', runId: 123 };
+  const comments = [{ id: 10, user: { login: 'github-actions[bot]', type: 'Bot' }, body: `<!-- traveled-greploop-attempt:${sha} -->` }];
+  const github = { paginate: async () => comments, rest: { issues: { listComments() {},
+    updateComment: async ({ comment_id, body }) => { assert.equal(comment_id, 10); comments[0].body = body; },
+  } } };
+  const core = { summary: { addRaw() { return this; }, async write() {} } };
+  for (const [jobs, expected] of [
+    [{ fix: 'success', validate: 'skipped', publish: 'skipped' }, /Needs maintainer attention/],
+    [{ fix: 'failure', publish: 'skipped' }, /Failed — needs maintainer attention/],
+    [{ fix: 'cancelled', publish: 'skipped' }, /Cancelled/],
+    [{ fix: 'success', validate: 'success', publish: 'success' }, /Finished — waiting for Greptile/],
+  ]) {
+    await finishAttempt({ github, context, core }, snapshot, jobs, {
+      reason: 'No source changes', summary: 'Blocked by configuration scope', remainingIssues: ['eslint.config.js requires a maintainer. @someone <img>'],
+    });
+    assert.match(comments[0].body, expected);
+    assert.match(comments[0].body, /eslint.config.js requires a maintainer/);
+    assert.doesNotMatch(comments[0].body, /@someone|<img>/);
+    assert.deepEqual(attemptsFrom(comments), [sha]);
+  }
+});
+
+test('no patch and forbidden configuration produce a maintainer report without an exportable patch', () => {
+  const temp = mkdtempSync(join(tmpdir(), 'traveled-greploop-blocked-'));
+  const source = join(temp, 'source');
+  mkdirSync(source);
+  const git = (...args) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: source, encoding: 'utf8', stdio: 'pipe' });
+  git('init');
+  writeFileSync(join(source, 'eslint.config.js'), 'export default [];\n');
+  git('add', '.');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'Fixture');
+  const snapshot = join(temp, 'review.json');
+  const result = join(temp, 'result.json');
+  const output = join(temp, 'output');
+  writeFileSync(snapshot, JSON.stringify({ threads: [] }));
+  writeFileSync(result, JSON.stringify({ summary: 'Blocked', addressedThreadIds: [], remainingIssues: ['Config requires maintainer changes'] }));
+  const script = resolve('.github/scripts/greploop-patch.mjs');
+  for (const changed of [false, true]) {
+    if (changed) writeFileSync(join(source, 'eslint.config.js'), 'export default [{}];\n');
+    const artifact = join(temp, changed ? 'forbidden' : 'empty');
+    execFileSync(process.execPath, [script, 'export', source, git('rev-parse', 'HEAD').trim(), snapshot, result, artifact], { env: { ...process.env, GITHUB_OUTPUT: output } });
+    const report = JSON.parse(readFileSync(join(artifact, 'result.json'), 'utf8'));
+    assert.match(report.reason, changed ? /eslint.config.js/ : /no source changes/);
+    assert.throws(() => readFileSync(join(artifact, 'fix.patch')), /ENOENT/);
+  }
+  assert.equal(readFileSync(output, 'utf8'), 'patch=false\npatch=false\n');
+});
+
+
+test('decision notices are updated and deduplicated without modifying attempt reservations', async () => {
+  const comments = [{ id: 1, user: { login: 'github-actions[bot]', type: 'Bot' }, body: `<!-- traveled-greploop-attempt:${sha} --> Running` }];
+  let updates = 0;
+  const github = { paginate: async () => comments, rest: { issues: { listComments() {},
+    createComment: async ({ body }) => comments.push({ id: 2, user: { login: 'github-actions[bot]', type: 'Bot' }, body }),
+    updateComment: async ({ comment_id, body }) => { assert.equal(comment_id, 2); updates++; comments[1].body = body; },
+  } } };
+  const context = { repo: { owner: 'owner', repo: 'repo' } };
+  const core = { summary: { addRaw() { return this; }, async write() {} } };
+  await notice({ github, context, core }, 9, 'No new run: already reserved.');
+  await notice({ github, context, core }, 9, 'No new run: already reserved.');
+  assert.equal(comments.length, 2);
+  assert.equal(updates, 0);
+  await notice({ github, context, core }, 9, 'Not running: review complete.');
+  assert.equal(updates, 1);
+  assert.match(comments[0].body, /Running$/);
+  assert.deepEqual(attemptsFrom(comments), [sha]);
+});
+
+
+test('write-capable reporting job uses only immutable action revisions', () => {
+  const workflow = readFileSync('.github/workflows/greploop.yml', 'utf8');
+  const report = workflow.match(/^ {2}report:\n([\s\S]*?)(?=^ {2}[a-z][\w-]*:\n|(?![\s\S]))/m)?.[1];
+  assert.ok(report, 'Reporting job must be present');
+  const actions = [...report.matchAll(/uses:\s*(\S+)/g)].map((match) => match[1]);
+  assert.ok(actions.length > 0);
+  for (const action of actions) assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/, `${action} must be pinned`);
 });

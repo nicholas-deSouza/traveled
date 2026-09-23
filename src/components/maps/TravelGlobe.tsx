@@ -10,11 +10,40 @@ import { tripColor } from '../../lib/tripColor';
 // A custom production style can replace it via VITE_MAP_STYLE_URL.
 const mapStyle = import.meta.env.VITE_MAP_STYLE_URL?.trim() || "https://tiles.openfreemap.org/styles/liberty";
 
+type Thumbnail = { id: string; path: string; title: string; tripId: string; color: string; count: number; x: number; y: number; dx: number; dy: number; url: string | null };
+type Popup = { title: string; tripId: string; count: number; coordinates: [number, number]; x: number; y: number };
+
+function PhotoMarker({ point }: { point: Thumbnail }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  return <div className="atlas-marker absolute" style={{ left: point.x, top: point.y }}>
+    <span className="atlas-marker-line" style={{ backgroundColor: point.color, width: Math.hypot(point.dx, point.dy), transform: `rotate(${Math.atan2(point.dy, point.dx)}rad)` }} />
+    <a className="atlas-photo pointer-events-auto" href={`/trips/${encodeURIComponent(point.tripId)}`} style={{ borderColor: point.color, transform: `translate(${point.dx}px, ${point.dy}px)` }} aria-label={`${point.title}: ${point.count} photos. Open trip`}>
+      <span className="atlas-photo-fallback">View trip</span>
+      {point.url && failedUrl !== point.url && <img src={point.url} alt="" onError={() => setFailedUrl(point.url)} />}
+      <span className="atlas-photo-count">{point.count}</span>
+    </a>
+  </div>;
+}
+
+function TripLocationPopup({ popup, onClose }: { popup: Popup; onClose: () => void }) {
+  const link = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { link.current?.focus(); }, []);
+  return <div role="dialog" aria-label="Trip location" onKeyDown={event => { if (event.key === 'Escape') onClose(); }} className="pointer-events-auto absolute z-10 w-56 rounded-xl bg-white p-3 shadow-lg" style={{ left: `clamp(7.5rem, ${popup.x}px, calc(100% - 7.5rem))`, top: `max(8rem, ${popup.y}px)`, transform: 'translate(-50%, calc(-100% - 12px))' }}>
+    <a ref={link} className="font-medium underline" href={`/trips/${encodeURIComponent(popup.tripId)}`}>{popup.title}</a>
+    <p>{popup.count} photos at this location</p>
+    <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+  </div>;
+}
+
 export function TravelGlobe({ trips, photos }: Atlas) {
+  const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
+  const [popup, setPopup] = useState<Popup | null>(null);
+  const popupRef = useRef<Popup | null>(null);
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const pausedRef = useRef(false);
   const container = useRef<HTMLDivElement>(null);
+  const interactionRoot = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!container.current) return;
@@ -27,7 +56,15 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     });
     const cache = thumbnailCache(downloadPhoto);
     const datasets = trips.map(trip => ({ trip, id: `trip-${trip.id}`, points: photoPoints(photos.filter(photo => photo.trip_id === trip.id)) }));
-    const markers = new Map<string, { marker: maplibregl.Marker; link: HTMLAnchorElement; image: HTMLImageElement; line: HTMLSpanElement }>();
+    const urls = new Map<string, string | null>();
+    let currentThumbnails: Thumbnail[] = [];
+    const publishThumbnails = () => setThumbnails(previous => {
+      const next = currentThumbnails.map(point => ({ ...point, url: urls.get(point.path) ?? null }));
+      return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+    });
+    setThumbnails([]);
+    setPopup(null);
+    popupRef.current = null;
     const updateThumbnails = () => {
       if (!map.isStyleLoaded()) return;
       const visible = new Map<string, { coordinates: [number, number]; path: string; title: string; tripId: string; color: string; count: number; x: number; y: number }>();
@@ -46,52 +83,24 @@ export function TravelGlobe({ trips, photos }: Atlas) {
           }
         }
       }
-      for (const [key, entry] of markers) {
-        if (!visible.has(key)) { entry.marker.remove(); markers.delete(key); }
-      }
       const offsets = markerOffsets([...visible].map(([id, point]) => ({ id, x: point.x, y: point.y })));
+      currentThumbnails = [...visible].map(([id, point]) => {
+        const [dx, dy] = offsets.get(id)!;
+        return { ...point, id, dx, dy, url: urls.get(point.path) ?? null };
+      });
       const wanted = new Map<string, (url: string | null) => void>();
-      for (const [key, point] of visible) {
-        let entry = markers.get(key);
-        if (!entry) {
-          const element = document.createElement('div');
-          element.className = 'atlas-marker';
-          const line = document.createElement('span');
-          line.className = 'atlas-marker-line';
-          line.style.backgroundColor = point.color;
-          const link = document.createElement('a');
-          link.className = 'atlas-photo';
-          link.href = `/trips/${encodeURIComponent(point.tripId)}`;
-          link.style.borderColor = point.color;
-          link.setAttribute('aria-label', `${point.title}: ${point.count} photos. Open trip`);
-          const fallback = document.createElement('span');
-          fallback.className = 'atlas-photo-fallback';
-          fallback.textContent = 'View trip';
-          const image = document.createElement('img');
-          image.alt = '';
-          image.hidden = true;
-          image.onerror = () => { image.hidden = true; };
-          const count = document.createElement('span');
-          count.className = 'atlas-photo-count';
-          count.textContent = String(point.count);
-          link.append(fallback, image, count);
-          element.append(line, link);
-          const marker = new maplibregl.Marker({ element, anchor: 'center' }).setLngLat(point.coordinates).addTo(map);
-          entry = { marker, link, image, line };
-          markers.set(key, entry);
-        }
-        entry.marker.setLngLat(point.coordinates);
-        const [dx, dy] = offsets.get(key)!;
-        entry.link.style.transform = `translate(${dx}px, ${dy}px)`;
-        entry.line.style.width = `${Math.hypot(dx, dy)}px`;
-        entry.line.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
-        const image = entry.image;
-        const previousReceiver = wanted.get(point.path);
+      for (const point of currentThumbnails) {
         wanted.set(point.path, url => {
-          previousReceiver?.(url);
-          if (url && image.getAttribute('src') !== url) { image.hidden = false; image.src = url; }
-          if (!url) { image.hidden = true; image.removeAttribute('src'); }
+          if (urls.get(point.path) === url) return;
+          urls.set(point.path, url);
+          publishThumbnails();
         });
+      }
+      for (const path of urls.keys()) if (!wanted.has(path)) urls.delete(path);
+      publishThumbnails();
+      if (popupRef.current) {
+        const point = map.project(popupRef.current.coordinates);
+        setPopup(previous => previous && (previous.x !== point.x || previous.y !== point.y) ? { ...previous, x: point.x, y: point.y } : previous);
       }
       cache.setVisible(wanted);
     };
@@ -114,8 +123,8 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     const recoverInteraction = (event: PointerEvent) => {
       if (event.buttons === 0) endInteraction();
     };
-    const visibilityChanged = () => { endInteraction(); previous = 0; delayRotation(); };
-    const element = container.current;
+    const windowFocused = () => { endInteraction(); previous = 0; delayRotation(); };
+    const element = interactionRoot.current!;
     element.addEventListener('pointerdown', startInteraction);
     window.addEventListener('pointerup', endInteraction, true);
     window.addEventListener('pointercancel', endInteraction, true);
@@ -125,11 +134,11 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     element.addEventListener('click', endInteraction);
     element.addEventListener('wheel', delayRotation, { passive: true });
     element.addEventListener('keydown', delayRotation);
-    document.addEventListener('visibilitychange', visibilityChanged);
+    window.addEventListener('focus', windowFocused);
     const rotate = (now: number) => {
-      const elapsed = previous ? (now - previous) / 1000 : 0;
+      const elapsed = previous ? Math.min((now - previous) / 1000, 0.25) : 0;
       previous = now;
-      if (map.isStyleLoaded() && !document.hidden && !media.matches && !pausedRef.current && !interacting && now >= resumeAt && !map.isMoving()) {
+      if (map.isStyleLoaded() && !media.matches && !pausedRef.current && !interacting && now >= resumeAt && !map.isMoving()) {
         const center = map.getCenter();
         map.jumpTo({ center: [center.lng + elapsed * 2, center.lat] });
       }
@@ -150,23 +159,16 @@ export function TravelGlobe({ trips, photos }: Atlas) {
         map.on('click', id, event => {
           const feature = event.features?.[0];
           if (feature?.geometry.type !== 'Point') return;
-          const content = document.createElement('div');
-          const link = document.createElement('a');
-          link.href = `/trips/${encodeURIComponent(trip.id)}`;
-          link.textContent = trip.title;
-          link.className = 'font-medium underline';
-          const count = document.createElement('p');
-          count.textContent = `${feature.properties?.count ?? 1} photos at this location`;
-          content.append(link, count);
-          new maplibregl.Popup({ offset: 12 })
-            .setLngLat(feature.geometry.coordinates as [number, number])
-            .setDOMContent(content).addTo(map);
+          const coordinates = feature.geometry.coordinates.slice(0, 2) as [number, number];
+          const point = map.project(coordinates);
+          const selected = { title: trip.title, tripId: trip.id, count: Number(feature.properties?.count ?? 1), coordinates, x: point.x, y: point.y };
+          popupRef.current = selected;
+          setPopup(selected);
         });
       }
     });
     return () => {
       map.off('render', updateThumbnails);
-      markers.forEach(entry => entry.marker.remove());
       cache.dispose();
       cancelAnimationFrame(frame);
       media.removeEventListener('change', preferenceChanged);
@@ -179,13 +181,18 @@ export function TravelGlobe({ trips, photos }: Atlas) {
       element.removeEventListener('click', endInteraction);
       element.removeEventListener('wheel', delayRotation);
       element.removeEventListener('keydown', delayRotation);
-      document.removeEventListener('visibilitychange', visibilityChanged);
+      window.removeEventListener('focus', windowFocused);
       map.remove();
     };
   }, [trips, photos]);
 
-  return <div className="relative">
-    <div ref={container} aria-label="Interactive globe with trip photo locations" className="h-[460px] w-full overflow-hidden rounded-3xl bg-ink md:h-[620px]" />
+  const closePopup = () => { popupRef.current = null; setPopup(null); container.current?.focus(); };
+  return <div ref={interactionRoot} className="relative">
+    <div ref={container} tabIndex={-1} aria-label="Interactive globe with trip photo locations" className="h-[460px] w-full overflow-hidden rounded-3xl bg-ink md:h-[620px]" />
+    <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
+      {thumbnails.map(point => <PhotoMarker key={point.id} point={point} />)}
+      {popup && <TripLocationPopup key={`${popup.tripId}-${popup.coordinates.join(',')}`} popup={popup} onClose={closePopup} />}
+    </div>
     <div className="absolute left-3 top-3 rounded-xl bg-white/95 p-2">
       <Button size="sm" variant="outline" disabled={reducedMotion} aria-pressed={paused || reducedMotion} onClick={() => {
         pausedRef.current = !pausedRef.current;

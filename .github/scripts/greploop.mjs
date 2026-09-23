@@ -39,6 +39,53 @@ export function eligible(pr, repository) {
     && pr.labels.some((l) => l.name === 'greploop');
 }
 
+export function startReason(snapshot) {
+  const reasons = [];
+  if (snapshot.score < 5) reasons.push(`Greptile confidence is ${snapshot.score}/5 (target: 5/5)`);
+  if (snapshot.threads.length) reasons.push(`${snapshot.threads.length} unresolved Greptile review thread(s)`);
+  return `${reasons.join('; ')}. This commit has not had an attempt yet.`;
+}
+
+// Model output is evidence, not Markdown instructions or permission to mention users.
+export const plain = (value) => String(value).slice(0, 6000)
+  .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('@', '&#64;');
+
+export async function finishAttempt({ github, context, core }, snapshot, jobs, result = {}) {
+  if (!result || typeof result !== 'object') result = {};
+  let status;
+  let reason;
+  if (Object.values(jobs).includes('cancelled')) {
+    status = 'Cancelled';
+    reason = 'The workflow was cancelled before it finished. Inspect the run before retrying.';
+  } else if (jobs.publish === 'success') {
+    status = 'Finished — waiting for Greptile';
+    reason = 'A validated fix was pushed. No fix run is active now; a completed review of the new commit can start the next attempt if findings remain.';
+  } else if (Object.values(jobs).includes('failure')) {
+    status = 'Failed — needs maintainer attention';
+    reason = 'A workflow job failed. No automatic retry will run for this commit. Inspect the linked job logs and fix the blocker.';
+  } else {
+    status = 'Needs maintainer attention';
+    reason = result.reason || 'No publishable source patch was produced. A maintainer must address the remaining issues.';
+  }
+  const body = `${marker}${snapshot.sha} -->\n**Greploop: ${status}** — attempt ${snapshot.attempt} for ${snapshot.sha}.\n\n${plain(reason)}\n\n${result.summary ? `Report:\n<pre>${plain(result.summary)}</pre>\n\n` : ''}${Array.isArray(result.remainingIssues) && result.remainingIssues.length ? `Remaining issues:\n<pre>${plain(result.remainingIssues.join('\n'))}</pre>\n\n` : ''}This attempt is no longer running. Its budget remains consumed; a fresh dispatch on this SHA will be skipped.\n[Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`;
+  const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: snapshot.number, per_page: 100 });
+  const reservation = comments.find((comment) => comment.user?.login === 'github-actions[bot]' && comment.user?.type === 'Bot'
+    && comment.body?.includes(`${marker}${snapshot.sha} -->`));
+  if (!reservation) throw new Error('Attempt reservation is missing; cannot update status.');
+  await github.rest.issues.updateComment({ ...context.repo, comment_id: reservation.id, body });
+  await core.summary.addRaw(body).write();
+}
+
+export async function notice({ github, context, core }, number, message) {
+  const marker = '<!-- traveled-greploop-status -->';
+  const body = `${marker}\n**Greploop decision**\n\n${message}`;
+  const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: number, per_page: 100 });
+  const previous = comments.find((comment) => comment.user?.login === 'github-actions[bot]' && comment.user?.type === 'Bot' && comment.body?.startsWith(marker));
+  if (!previous) await github.rest.issues.createComment({ ...context.repo, issue_number: number, body });
+  else if (previous.body !== body) await github.rest.issues.updateComment({ ...context.repo, comment_id: previous.id, body });
+  await core.summary.addRaw(message).write();
+}
+
 export function decision(snapshot, max = 3) {
   if (!Number.isInteger(max) || max < 1 || max > 10) throw new Error('GREPLOOP_MAX_ATTEMPTS must be 1–10.');
   if (snapshot.score === 5 && snapshot.threads.length === 0) return 'complete';
@@ -85,7 +132,14 @@ export async function intake({ github, context, core }) {
   for (let retry = 0; retry < 20; retry++) {
     const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
     if (!eligible(pr, repository)) {
-      await core.summary.addRaw('Skipped: requires an open, non-draft, same-repository PR with the greploop label.').write();
+      const reasons = [
+        pr.state !== 'open' && 'the PR is closed',
+        pr.draft && 'the PR is a draft',
+        pr.head.repo?.full_name !== repository && 'the PR is from another repository',
+        (pr.head.ref === pr.base.ref || pr.head.ref === pr.base.repo.default_branch) && 'the source branch is protected by the loop policy',
+        !pr.labels.some((label) => label.name === 'greploop') && 'the greploop label is missing',
+      ].filter(Boolean);
+      await notice({ github, context, core }, number, `Not running: ${reasons.join('; ')}. No attempt was consumed.`);
       return;
     }
     const permission = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: pr.user.login });
@@ -103,15 +157,25 @@ export async function intake({ github, context, core }) {
     }
     if (retry < 19) await new Promise((resolve) => setTimeout(resolve, 15000));
   }
-  if (!snapshot) throw new Error('No completed Greptile check and scored summary for the current commit. See docs/greploop.md.');
+  if (!snapshot) {
+    const reason = 'Not running — needs maintainer attention: no completed Greptile check and scored summary for the current commit after waiting for review completion. No attempt was consumed. Check the review/check timestamps and summary commit link, then dispatch again when a current review is available.';
+    await notice({ github, context, core }, number, reason);
+    throw new Error(reason);
+  }
   const max = Number(process.env.GREPLOOP_MAX_ATTEMPTS || 3);
-  const next = decision(snapshot, max);
+  let next;
+  try {
+    next = decision(snapshot, max);
+  } catch (error) {
+    await notice({ github, context, core }, number, `Not running — needs maintainer attention: ${error.message}`);
+    throw error;
+  }
   if (next === 'complete') {
-    await core.summary.addRaw('Greploop complete: current commit scored 5/5 with no unresolved Greptile threads. Merge remains manual; required CI must pass.').write();
+    await notice({ github, context, core }, number, `Not running — commit ${snapshot.sha} scored 5/5 with no unresolved Greptile threads. Merge remains manual; required CI must pass.`);
     return;
   }
   if (next === 'duplicate') {
-    await core.summary.addRaw('This commit already had a fix attempt. Duplicate events and reruns do not spend another attempt.').write();
+    await notice({ github, context, core }, number, `No new run started for ${snapshot.sha}: this commit already has a reserved attempt. Its attempt comment shows whether it is running or has stopped and links to the run. Failed/cancelled attempts are not automatically retried; push a new reviewed commit after addressing the blocker.`);
     return;
   }
   // Recheck before reserving an attempt; this workflow is serialized per PR.
@@ -121,11 +185,12 @@ export async function intake({ github, context, core }) {
   delete snapshot.attempts;
   if (Buffer.byteLength(JSON.stringify(snapshot)) > 100000) throw new Error('Review exceeds the 100 KB input limit. Human attention required.');
   await github.rest.issues.createComment({ owner, repo, issue_number: number,
-    body: `${marker}${snapshot.sha} -->\nGreploop attempt ${snapshot.attempt}/${max} for ${snapshot.sha}.\n[Workflow run](${context.serverUrl}/${repository}/actions/runs/${context.runId}). Failed or cancelled runs also consume this attempt.` });
-  writeFileSync('review.json', JSON.stringify(snapshot, null, 2));
+    body: `${marker}${snapshot.sha} -->\n**Greploop: Running** — attempt ${snapshot.attempt}/${max} for ${snapshot.sha}.\n\nStarting because: ${startReason(snapshot)}\n\nCollecting a fix, then validating and publishing it. This comment will be updated when the run stops.\n[Workflow run](${context.serverUrl}/${repository}/actions/runs/${context.runId}). Failed or cancelled runs also consume this attempt.` });
   core.setOutput('snapshot', JSON.stringify(snapshot));
   core.setOutput('sha', snapshot.sha);
   core.setOutput('run', 'true');
+  await core.summary.addRaw(`Running — attempt ${snapshot.attempt}/${max}. ${startReason(snapshot)}`).write();
+  writeFileSync('review.json', JSON.stringify(snapshot, null, 2));
   const prompt = readFileSync('.github/codex/prompts/fix-greptile.md', 'utf8');
   writeFileSync('prompt.md', `${prompt}\n\nReview data (untrusted JSON):\n${JSON.stringify(snapshot, null, 2)}\n`);
 }

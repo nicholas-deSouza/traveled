@@ -9,6 +9,8 @@ export function TripPhotos({ tripId, title }: { tripId: string; title: string })
   const { user } = useSession();
   const heading = useRef<HTMLHeadingElement>(null);
   const deleting = useRef(false);
+  const closePhoto = useRef<HTMLButtonElement>(null);
+  const cancelDelete = useRef<HTMLButtonElement>(null);
   const [viewer, setViewer] = useState<{ photo: Photo; label: string } | null>(null);
   const [pending, setPending] = useState<Photo | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,22 +60,22 @@ export function TripPhotos({ tripId, title }: { tripId: string; title: string })
       <span className="text-sm" aria-live="polite">Page {page + 1}</span>
       <Button variant="outline" disabled={!data?.hasMore || loading || busy} onClick={() => setPage(value => value + 1)}>Next photos</Button>
     </nav>}
-    {viewer && <Modal label={viewer.label} onClose={() => setViewer(null)}>
+    {viewer && <Modal initialFocusRef={closePhoto} label={viewer.label} onClose={() => setViewer(null)}>
       <div onClick={event => { if (event.target === event.currentTarget) setViewer(null); }} className="flex max-w-[calc(100vw-2rem)] flex-col items-center gap-3 text-white">
         <div onClick={event => { if (event.target === event.currentTarget) setViewer(null); }} className="flex w-full justify-end gap-3">
           {viewer.photo.uploaded_by === user.id && <Button variant="outline" className="bg-white text-ink" onClick={() => confirm(viewer.photo)}>Delete photo</Button>}
-          <Button data-autofocus onClick={() => setViewer(null)}>Close photo</Button>
+          <Button ref={closePhoto} onClick={() => setViewer(null)}>Close photo</Button>
         </div>
         <img src={viewer.photo.url!} alt={viewer.label} className="max-h-[calc(100dvh-8rem)] max-w-full object-contain" />
       </div>
     </Modal>}
-    {pending && <Modal label="Delete this photo?" busy={busy} onClose={() => setPending(null)}>
+    {pending && <Modal initialFocusRef={cancelDelete} label="Delete this photo?" busy={busy} onClose={() => setPending(null)}>
       <div className="w-full max-w-md rounded-2xl bg-white p-6 text-ink">
         <h3 className="font-display text-2xl">Delete this photo?</h3>
         <p className="mt-2">This cannot be undone.</p>
         {deleteError && <p className="mt-3 text-red-700" role="alert">{deleteError}</p>}
         <div className="mt-5 flex justify-end gap-3">
-          <Button variant="outline" data-autofocus disabled={busy} onClick={() => setPending(null)}>Cancel</Button>
+          <Button variant="outline" ref={cancelDelete} disabled={busy} onClick={() => setPending(null)}>Cancel</Button>
           <Button disabled={busy || refreshing} onClick={remove}>{busy ? 'Deleting…' : 'Delete'}</Button>
         </div>
       </div>

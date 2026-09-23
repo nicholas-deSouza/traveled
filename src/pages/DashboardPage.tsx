@@ -19,14 +19,14 @@ export function DashboardPage() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => {
       clearTimeout(timer);
-      if (!document.hidden) timer = setTimeout(reload, 100);
+      timer = setTimeout(reload, 100);
     };
     window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('pageshow', refresh);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('pageshow', refresh);
     };
   }, [reload]);
   const trips = data?.trips ?? emptyTrips;
