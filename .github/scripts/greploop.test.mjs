@@ -7,6 +7,18 @@ import { join, resolve } from 'node:path';
 import { allowedPath, validateResult } from './greploop-patch.mjs';
 import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice } from './greploop.mjs';
 
+// All fixture subprocesses must be isolated from the committing repository.
+function exec(command, args, options = {}) {
+  const env = { ...process.env, ...options.env };
+  for (const key of execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).trim().split(/\s+/)) {
+    delete env[key];
+  }
+  // Avoid writing fixture output to a real workflow's output file.
+  delete env.GITHUB_OUTPUT;
+  if (options.env?.GITHUB_OUTPUT) env.GITHUB_OUTPUT = options.env.GITHUB_OUTPUT;
+  return execFileSync(command, args, { ...options, env });
+}
+
 const sha = 'a'.repeat(40);
 const bot = { login: 'greptile-apps[bot]', type: 'Bot' };
 const pr = { state: 'open', draft: false, labels: [{ name: 'greploop' }],
@@ -142,13 +154,6 @@ test('intake collects paginated threads, reserves one attempt and ignores the du
 });
 
 test('patch exports and applies in a fresh checkout; deleted files are rejected', () => {
-  // Hooks export repository-local Git variables. Do not let temporary repos
-  // inherit the committing repository's worktree, object directory, or index.
-  const env = { ...process.env };
-  for (const key of execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).trim().split(/\s+/)) {
-    delete env[key];
-  }
-  const exec = (command, args, options = {}) => execFileSync(command, args, { ...options, env });
   const temp = mkdtempSync(join(tmpdir(), 'traveled-greploop-'));
   const source = join(temp, 'source');
   mkdirSync(join(source, 'src'), { recursive: true });
@@ -213,7 +218,7 @@ test('no patch and forbidden configuration produce a maintainer report without a
   const temp = mkdtempSync(join(tmpdir(), 'traveled-greploop-blocked-'));
   const source = join(temp, 'source');
   mkdirSync(source);
-  const git = (...args) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: source, encoding: 'utf8', stdio: 'pipe' });
+  const git = (...args) => exec('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: source, encoding: 'utf8', stdio: 'pipe' });
   git('init');
   writeFileSync(join(source, 'eslint.config.js'), 'export default [];\n');
   git('add', '.');
@@ -227,7 +232,7 @@ test('no patch and forbidden configuration produce a maintainer report without a
   for (const changed of [false, true]) {
     if (changed) writeFileSync(join(source, 'eslint.config.js'), 'export default [{}];\n');
     const artifact = join(temp, changed ? 'forbidden' : 'empty');
-    execFileSync(process.execPath, [script, 'export', source, git('rev-parse', 'HEAD').trim(), snapshot, result, artifact], { env: { ...process.env, GITHUB_OUTPUT: output } });
+    exec(process.execPath, [script, 'export', source, git('rev-parse', 'HEAD').trim(), snapshot, result, artifact], { env: { GITHUB_OUTPUT: output } });
     const report = JSON.parse(readFileSync(join(artifact, 'result.json'), 'utf8'));
     assert.match(report.reason, changed ? /eslint.config.js/ : /no source changes/);
     assert.throws(() => readFileSync(join(artifact, 'fix.patch')), /ENOENT/);
@@ -263,4 +268,35 @@ test('write-capable reporting job uses only immutable action revisions', () => {
   const actions = [...report.matchAll(/uses:\s*(\S+)/g)].map((match) => match[1]);
   assert.ok(actions.length > 0);
   for (const action of actions) assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/, `${action} must be pinned`);
+});
+
+
+test('repository fixtures are safe inside a Git hook', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'traveled-greploop-hook-'));
+  const git = (...args) => exec('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: parent, encoding: 'utf8', stdio: 'pipe' });
+  git('init');
+  writeFileSync(join(parent, 'sentinel.txt'), 'original\n');
+  git('add', 'sentinel.txt');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-m', 'Fixture');
+  writeFileSync(join(parent, 'sentinel.txt'), 'staged change\n');
+  git('add', 'sentinel.txt');
+  const config = readFileSync(join(parent, '.git/config'));
+  const index = readFileSync(join(parent, '.git/index'));
+  const head = git('rev-parse', 'HEAD');
+  const output = join(parent, 'workflow-output');
+  writeFileSync(output, 'untouched\n');
+  // Deliberately pass hook variables only to this child test runner. Its fixture
+  // helpers must clear them before invoking Git or the patch-export process.
+  const env = { ...process.env, GIT_DIR: join(parent, '.git'), GIT_WORK_TREE: parent, GIT_INDEX_FILE: join(parent, '.git/index'), GITHUB_OUTPUT: output };
+  delete env.NODE_TEST_CONTEXT;
+  const results = execFileSync(process.execPath, ['--test', '--test-reporter=tap', '--test-name-pattern=^(patch exports|no patch and forbidden)', resolve('.github/scripts/greploop.test.mjs')], {
+    stdio: 'pipe', encoding: 'utf8', env,
+  });
+  assert.match(results, /ok \d+ - patch exports and applies/);
+  assert.match(results, /ok \d+ - no patch and forbidden configuration/);
+  assert.deepEqual(readFileSync(join(parent, '.git/config')), config);
+  assert.deepEqual(readFileSync(join(parent, '.git/index')), index);
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.equal(readFileSync(join(parent, 'sentinel.txt'), 'utf8'), 'staged change\n');
+  assert.equal(readFileSync(output, 'utf8'), 'untouched\n');
 });

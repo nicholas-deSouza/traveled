@@ -12,7 +12,7 @@ function mount() {
   return render(<MemoryRouter initialEntries={['/trips/paris']}><Routes><Route path="/trips/:tripId" element={<TripDetailPage />} /></Routes></MemoryRouter>);
 }
 it('uploads a selected photo and reports success', async () => {
-  const trip = { id: 'paris', group_id: 'friends', title: 'Paris', description: null, starts_on: null, ends_on: null };
+  const trip = { id: 'paris', group_id: 'friends', created_by: 'member', color: null, title: 'Paris', description: null, starts_on: null, ends_on: null };
   vi.mocked(loadTrip).mockResolvedValue({ trip, group: { id: 'friends', name: 'Friends', created_by: 'owner' } });
   vi.mocked(uploadPhoto).mockResolvedValue(undefined);
   mount();

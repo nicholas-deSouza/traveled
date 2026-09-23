@@ -95,28 +95,28 @@ test('uploads persist extracted coordinates and clean up storage on metadata ins
 
 function deletionFixture({ owner = 'me', storageError = null, rows = [{ id: 'photo' }] } = {}) {
   const calls = [];
-  const db = { from() { return {
+  const db = { auth: { getUser: async () => ({ data: { user: { id: 'me' } }, error: null }) }, from() { return {
     select() { return this; }, eq() { return this; }, single() { return { data: { id: 'photo', uploaded_by: owner, storage_path: 'canonical/path' }, error: null }; },
-    delete() { calls.push('record'); return { eq() { return this; }, select() { return { data: rows, error: null }; } }; },
-  }; }, storage: { from() { return { remove: async paths => { calls.push(paths[0]); return { error: storageError }; } }; } } };
+    delete() { calls.push('record'); return { eq() { return this; }, select() { return this; }, single() { return { data: rows[0] ?? null, error: null }; } }; },
+  }; }, storage: { from() { return { remove: async paths => { calls.push(paths[0]); return { data: [{ name: 'canonical/path' }], error: storageError }; } }; } } };
   return { api: dataApi(db), calls };
 }
 
 test('deletion checks owner and removes canonical storage object before record', async () => {
   const denied = deletionFixture({ owner: 'other' });
-  await assert.rejects(denied.api.deletePhoto('photo', 'me'), /own photos/);
+  await assert.rejects(denied.api.deletePhoto('photo'), /Only the uploader/);
   assert.deepEqual(denied.calls, []);
-  const allowed = deletionFixture(); await allowed.api.deletePhoto('photo', 'me');
+  const allowed = deletionFixture(); await allowed.api.deletePhoto('photo');
   assert.deepEqual(allowed.calls, ['canonical/path', 'record']);
 });
 
 test('deletion preserves record on storage errors, handles missing files, and reports partial failures', async () => {
   const failed = deletionFixture({ storageError: new Error('Offline') });
-  await assert.rejects(failed.api.deletePhoto('photo', 'me'), /Offline/); assert.equal(failed.calls.length, 1);
-  const retry = deletionFixture({ storageError: { statusCode: '404' } });
-  await retry.api.deletePhoto('photo', 'me'); assert.equal(retry.calls.length, 2);
+  await assert.rejects(failed.api.deletePhoto('photo'), /Offline/); assert.equal(failed.calls.length, 1);
+  const retry = deletionFixture({ storageError: { code: 'ObjectNotFound' } });
+  await retry.api.deletePhoto('photo'); assert.equal(retry.calls.length, 2);
   const partial = deletionFixture({ rows: [] });
-  await assert.rejects(partial.api.deletePhoto('photo', 'me'), /Retry deletion/);
+  await assert.rejects(partial.api.deletePhoto('photo'), /Retry to finish cleanup/);
 });
 
 test('thumbnail downloads are bounded and stale results never allocate private URLs', async () => {
