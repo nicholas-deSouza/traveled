@@ -83,3 +83,26 @@ psql -d traveled_test -v ON_ERROR_STOP=1 -f supabase/tests/bootstrap.sql -f /tmp
 The security tests roll back their fixtures. They verify PostgreSQL policies, not Supabase's HTTP Storage service or email delivery. For an end-to-end check on your configured project, create a group as user A, copy its invitation, open it in a separate browser profile as user B, join, create a trip, and upload a photo. Confirm A can see it and an uninvited user C cannot open either the group or trip. Generate a replacement invitation and verify the previous link fails.
 
 EXIF extraction and mapping real uploaded photos remain future work.
+
+## Component tests and pre-commit checks
+
+Run `pnpm install`, then `pnpm test` for the full local test suite: component/test
+pairing, Vitest component tests, and Node script tests. Use `pnpm test:watch` for
+component watch mode or `pnpm test:unit -- src/components/ui/button.test.tsx` to
+run one file. Tests use jsdom and React Testing Library, mock external services,
+and do not load `.env` files or require Supabase credentials.
+
+Every component file under `src/`, including pages and `App.tsx`, needs a sibling
+`<name>.test.tsx` with meaningful behavior tests. `src/main.tsx` and `src/test/`
+helpers are excluded. The pairing check prevents new components without test
+files; assertions should cover the component's interactions and relevant states.
+
+Enable the pre-commit hook in each clone with:
+
+```sh
+git config --local core.hooksPath .githooks
+```
+
+The hook runs `pnpm test` and blocks commits on failure. It tests the current
+working tree. Database policy tests above are separate integration tests requiring
+a disposable PostgreSQL database.

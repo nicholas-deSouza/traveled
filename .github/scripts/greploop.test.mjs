@@ -139,10 +139,17 @@ test('intake collects paginated threads, reserves one attempt and ignores the du
 });
 
 test('patch exports and applies in a fresh checkout; deleted files are rejected', () => {
+  // Hooks export repository-local Git variables. Do not let temporary repos
+  // inherit the committing repository's worktree, object directory, or index.
+  const env = { ...process.env };
+  for (const key of execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' }).trim().split(/\s+/)) {
+    delete env[key];
+  }
+  const exec = (command, args, options = {}) => execFileSync(command, args, { ...options, env });
   const temp = mkdtempSync(join(tmpdir(), 'traveled-greploop-'));
   const source = join(temp, 'source');
   mkdirSync(join(source, 'src'), { recursive: true });
-  const git = (...args) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: source, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const git = (...args) => exec('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: source, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('init');
   writeFileSync(join(source, 'src/app.ts'), 'export const count = 1;\n');
   git('add', 'src/app.ts');
@@ -155,14 +162,14 @@ test('patch exports and applies in a fresh checkout; deleted files are rejected'
   writeFileSync(result, JSON.stringify({ summary: 'Fixed', addressedThreadIds: [], remainingIssues: [] }));
   writeFileSync(join(source, 'src/app.ts'), 'export const count = 2;\n');
   const script = resolve('.github/scripts/greploop-patch.mjs');
-  execFileSync(process.execPath, [script, 'export', source, fixtureSha, snapshot, result, artifact]);
+  exec(process.execPath, [script, 'export', source, fixtureSha, snapshot, result, artifact]);
   const fresh = join(temp, 'fresh');
-  execFileSync('git', ['clone', '--quiet', source, fresh]);
-  execFileSync(process.execPath, [script, 'apply', fresh, fixtureSha, snapshot, result, artifact]);
+  exec('git', ['clone', '--quiet', source, fresh]);
+  exec(process.execPath, [script, 'apply', fresh, fixtureSha, snapshot, result, artifact]);
   assert.match(readFileSync(join(fresh, 'src/app.ts'), 'utf8'), /count = 2/);
   const deletion = `diff --git a/src/app.ts b/src/app.ts\ndeleted file mode 100644\n--- a/src/app.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const count = 1;\n`;
   writeFileSync(join(artifact, 'fix.patch'), deletion);
   const another = join(temp, 'another');
-  execFileSync('git', ['clone', '--quiet', source, another]);
-  assert.throws(() => execFileSync(process.execPath, [script, 'apply', another, fixtureSha, snapshot, result, artifact], { stdio: 'pipe' }), /Only regular source-file/);
+  exec('git', ['clone', '--quiet', source, another]);
+  assert.throws(() => exec(process.execPath, [script, 'apply', another, fixtureSha, snapshot, result, artifact], { stdio: 'pipe' }), /Only regular source-file/);
 });
