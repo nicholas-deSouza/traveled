@@ -140,7 +140,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     map.on("style.load", () => {
       map.setProjection({ type: "globe" });
       for (const { trip, id, points } of datasets) {
-        map.addSource(id, { type: 'geojson', data: points.data, cluster: true, clusterRadius: 60, clusterMaxZoom: 14,
+        map.addSource(id, { type: 'geojson', data: points.data, cluster: true, clusterRadius: 80, clusterMaxZoom: 14,
           clusterProperties: { count: ['+', ['get', 'count']], representative: ['min', ['get', 'representative']] },
         });
         map.addLayer({ id, type: 'circle', source: id, paint: {
