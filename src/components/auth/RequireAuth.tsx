@@ -19,9 +19,9 @@ export function RequireAuth() {
     }).catch(error => { if (active) setState({ loading: false, session: null, error: errorMessage(error) }); });
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
-  if (!supabase) return <div className="py-12"><h1 className="font-display text-4xl">Connect your shared atlas</h1><p className="mt-3">Groups require Supabase authentication and the database migrations. Follow the local setup in README.</p><Link className="mt-4 inline-block underline" to="/">Back to preview</Link></div>;
+  if (!supabase) return <div className="py-12"><h1 className="font-display text-4xl">Connect your shared atlas</h1><p className="mt-3">Groups require Supabase authentication and the database migrations. Follow the local setup in README.</p><Link className="mt-4 inline-block underline" to="/">Back to home</Link></div>;
   if (callbackError) {
-    const next = new URLSearchParams(location.search).get('next') || '/groups';
+    const next = new URLSearchParams(location.search).get('next') || '/';
     return <div className="py-12"><p role="alert">Sign-in link unavailable: {callbackError}</p><Link className="mt-4 inline-block underline" to={`/login?next=${encodeURIComponent(next)}`}>Request a new sign-in link</Link></div>;
   }
   if (state.loading) return <p className="py-12" role="status">Signing you in…</p>;
