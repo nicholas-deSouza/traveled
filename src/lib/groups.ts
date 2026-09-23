@@ -81,7 +81,7 @@ export async function loadTrip(id: string) {
 
 export const PHOTO_PAGE_SIZE = 8;
 
-export async function loadTripPhotos(id: string, page = 0) {
+export async function loadTripPhotos(id: string, page = 0, previousPhotos: readonly Photo[] = []) {
   if (!Number.isSafeInteger(page) || page < 0) throw new Error('Invalid photo page.');
   const db = client();
   const start = page * PHOTO_PAGE_SIZE;
@@ -91,9 +91,11 @@ export async function loadTripPhotos(id: string, page = 0) {
     .order('created_at', { ascending: false }).order('id', { ascending: false })
     .range(start, start + PHOTO_PAGE_SIZE);
   if (error) throw error;
-  // Only this page is downloaded, concurrently. Each authenticated download
-  // checks membership; no reusable signed URLs outlive a membership change.
+  // Revalidate page metadata under RLS before reusing mounted-gallery blob URLs.
+  // Download only new or unavailable images, concurrently; never cache signed URLs.
   const photos: Photo[] = await Promise.all(rows.slice(0, PHOTO_PAGE_SIZE).map(async row => {
+    const cached = previousPhotos.find(photo => photo.id === row.id && photo.storage_path === row.storage_path && photo.uploaded_by === row.uploaded_by && photo.url);
+    if (cached) return { ...row, url: cached.url };
     try {
       const { data, error: downloadError } = await db.storage.from('trip-photos').download(row.storage_path);
       if (downloadError || !data) return { ...row, url: null };
@@ -108,6 +110,37 @@ export async function loadTripPhotos(id: string, page = 0) {
 
 export function releasePhotos(photos: Photo[]) {
   photos.forEach(photo => { if (photo.url) URL.revokeObjectURL(photo.url); });
+}
+
+export async function deletePhoto(photoId: string): Promise<void> {
+  const db = client();
+  const { data: { user }, error: authError } = await db.auth.getUser();
+  if (authError) throw authError;
+  if (!user) throw new Error('Sign in to delete a photo.');
+  // Re-read trusted metadata under RLS; never accept a storage path from the UI.
+  const { data: photo, error } = await db.from('photos')
+    .select('id, storage_path, uploaded_by').eq('id', photoId).single();
+  if (error) throw error;
+  if (!photo || photo.uploaded_by !== user.id) throw new Error('Only the uploader can delete this photo.');
+  const bucket = db.storage.from('trip-photos');
+  const { data: removed, error: storageError } = await bucket.remove([photo.storage_path]);
+  // Missing files are safe to retry; other storage failures leave metadata intact.
+  const storageCode = storageError && 'code' in storageError ? String(storageError.code) : '';
+  if (storageError && !['NoSuchKey', 'ObjectNotFound'].includes(storageCode)) throw storageError;
+  if (!storageError && !removed?.length) {
+    // Storage can silently skip a row denied by RLS. Do not orphan that file.
+    const { data: exists, error: existsError } = await bucket.exists(photo.storage_path);
+    if (existsError) throw existsError;
+    if (exists !== false) throw new Error('The photo file could not be removed. Please retry.');
+  }
+  try {
+    const { data: deleted, error: metadataError } = await db.from('photos').delete()
+      .eq('id', photo.id).eq('uploaded_by', user.id).select('id').single();
+    if (metadataError) throw metadataError;
+    if (!deleted) throw new Error('Deletion was denied or the photo is no longer available.');
+  } catch (error) {
+    throw new Error(`The photo file was removed or is already absent, but its gallery entry could not be deleted. Retry to finish cleanup. ${errorMessage(error)}`);
+  }
 }
 
 export async function uploadPhoto(trip: Trip, userId: string, file: File) {

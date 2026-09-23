@@ -9,14 +9,13 @@ import { JoinGroupPage } from './pages/JoinGroupPage';
 import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { PasswordPage } from './pages/PasswordPage';
 import { RequireAuth } from './components/auth/RequireAuth';
-import { isSupabaseConfigured } from './lib/supabase';
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
-        {!isSupabaseConfigured && <Route path="/" element={<div className="py-12"><h1 className="font-display text-4xl">Connect your shared atlas</h1><p className="mt-3">Set up Supabase and apply the database migrations to see your trips. Follow README for local setup.</p></div>} />}
+        <Route path="/" element={<DashboardPage />} />
         <Route element={<RequireAuth />}>
           {isSupabaseConfigured && <Route path="/" element={<DashboardPage />} />}
           <Route path="/groups" element={<GroupsPage />} />
