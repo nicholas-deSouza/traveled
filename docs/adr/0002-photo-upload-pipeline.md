@@ -30,6 +30,14 @@ Support still HEIC images as inputs alongside JPEG, PNG, and still WebP. Users c
 
 These settings favor gallery quality, lower transfer volume, and lower Storage usage over preserving originals for printing. Validate visual quality and actual encoded size before finalizing the settings. Videos and GIFs are out of scope; do not convert GIFs into still frames. Motion from Live Photos is out of scope. The HEIC decoder, treatment of multi-image HEIC files, and resource limits remain open.
 
+#### Persist GPS under the photo submission ID
+
+Assign the stable unique submission ID before the first transfer and retain it through original upload, optimization, candidate upload, retries, and publication. Extract GPS from the original image and save the coordinates durably on the server with that ID, scoped to the authenticated uploader and trip, before optimization strips the metadata. The server must acknowledge this metadata handoff before the optimized candidate is considered ready for final verification and publication. Saving coordinates is idempotent under the submission ID; a failed save retries the same submission rather than creating another photo.
+
+Validate latitude and longitude as a complete finite pair within their geographic ranges. If GPS is missing or cannot be extracted, explicitly record both coordinates as absent; this must not block an otherwise valid photo. Distinguish a completed extraction with absent GPS from a metadata handoff that has not completed yet.
+
+Publication populates the gallery entry's coordinates from the saved submission metadata. Recovery reads that same server record rather than relying on browser memory, GPS embedded in the optimized WebP, or an original that may already have been cleaned up. This preserves map locations if the browser closes after candidate transfer and allows unused original images to be removed safely after publication.
+
 #### Server optimization alternative considered and declined
 
 Trusted server processing could upload the original once, moderate its immutable bytes, optimize that same approved source into WebP, and publish the derivative without accepting replacement image bytes from the browser. It could finish processing while the browser is closed and avoid a second moderation check solely to defend against client substitution. This alternative was declined in favor of browser pWorkers and avoiding a required Supabase Pro subscription for the side project.
@@ -51,7 +59,8 @@ Use Supabase Storage for both stages, with a completely separate private quarant
 5. Optimize approved images into WebP with a browser pWorker.
 6. Transfer the optimized candidate to quarantine with a uWorker, using the same submission identity.
 7. Have the server moderate the actual optimized candidate; delete rejected images and notify the uploader.
-8. Publish the approved candidate into the gallery's separate bucket and create the gallery entry through a trusted server operation.
+8. Publish the approved candidate into the gallery's separate bucket and create the gallery entry, including the saved GPS metadata, through a trusted server operation.
+9. After the published object and gallery entry are confirmed, clean up the submission's original and optimized candidate copies in quarantine.
 
 The ordering is deliberate: avoid spending optimization resources on an image that fails verification. Decoding an input for classification, including HEIC compatibility, may still be necessary before a verdict; this is distinct from resizing and encoding the final gallery image.
 
@@ -62,6 +71,14 @@ The separate bucket makes the trust boundary explicit. Client checks are an advi
 Browser pWorkers require transferring the original first and the optimized candidate later, using the same upload concurrency pool. Approval of the original cannot authorize arbitrary replacement bytes: a modified browser could substitute an explicit image after approval. The final server check is therefore required for the selected browser-processing design. The initial check still prevents optimization of originals that fail verification; the final check protects the publication boundary from a substituted candidate.
 
 Release the uWorker after each confirmed transfer so later photos can upload while the server checks earlier photos. Show transferred-but-unapproved submissions as awaiting moderation rather than completed. Moderation before optimization reduces wasted processing on rejected sources, but original uploads, second transfers, and final output verification can increase bandwidth and time to gallery visibility.
+
+### Clean up quarantine after successful publication
+
+Keep the original while it is needed for browser optimization or recovery, and keep the optimized candidate until the approved published object and its gallery entry, including coordinates, are durably confirmed. Then remove both quarantine copies for that submission. Retain the published WebP and its gallery metadata. This avoids permanently storing full-size originals or duplicate optimized files while preserving recovery until publication succeeds.
+
+Record durable cleanup work as part of finalization, identified by submission ID and trusted server-owned quarantine paths, so interruption after publication cannot silently leave unused objects behind. Cleanup is idempotent: an already-missing quarantine object counts as removed. Delete each remaining copy independently and persist progress so a partial cleanup can resume.
+
+If deletion fails, leave the photo published, keep the remaining quarantine objects private, and schedule a delayed cleanup retry with backoff while releasing the worker. Cleanup must not repeat moderation, optimization, or publication, create another gallery entry, or delete the published object. Keep failed cleanup work discoverable and retryable after automatic attempts are exhausted; cleanup retry limits and operational handling remain implementation details to settle.
 
 ### Block nudity and sexual activity
 
