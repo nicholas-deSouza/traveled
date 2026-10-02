@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from 'react-router-dom';
 import maplibregl from "maplibre-gl";
 import { Button } from "../ui/button";
 import { downloadPhoto, type Atlas } from '../../lib/groups';
@@ -17,11 +18,11 @@ function PhotoMarker({ point }: { point: Thumbnail }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   return <div className="atlas-marker absolute" style={{ left: point.x, top: point.y }}>
     <span className="atlas-marker-line" style={{ backgroundColor: point.color, width: Math.hypot(point.dx, point.dy), transform: `rotate(${Math.atan2(point.dy, point.dx)}rad)` }} />
-    <a className="atlas-photo pointer-events-auto" href={`/trips/${encodeURIComponent(point.tripId)}`} style={{ borderColor: point.color, transform: `translate(${point.dx}px, ${point.dy}px)` }} aria-label={`${point.title}: ${point.count} photos. Open trip`}>
+    <Link className="atlas-photo pointer-events-auto" to={`/trips/${encodeURIComponent(point.tripId)}`} style={{ borderColor: point.color, transform: `translate(${point.dx}px, ${point.dy}px)` }} aria-label={`${point.title}: ${point.count} photos. Open trip`}>
       <span className="atlas-photo-fallback">View trip</span>
       {point.url && failedUrl !== point.url && <img src={point.url} alt="" onError={() => setFailedUrl(point.url)} />}
       <span className="atlas-photo-count">{point.count}</span>
-    </a>
+    </Link>
   </div>;
 }
 
@@ -29,7 +30,7 @@ function TripLocationPopup({ popup, onClose }: { popup: Popup; onClose: () => vo
   const link = useRef<HTMLAnchorElement>(null);
   useEffect(() => { link.current?.focus(); }, []);
   return <div role="dialog" aria-label="Trip location" onKeyDown={event => { if (event.key === 'Escape') onClose(); }} className="pointer-events-auto absolute z-10 w-56 rounded-xl bg-white p-3 shadow-lg" style={{ left: `clamp(7.5rem, ${popup.x}px, calc(100% - 7.5rem))`, top: `max(8rem, ${popup.y}px)`, transform: 'translate(-50%, calc(-100% - 12px))' }}>
-    <a ref={link} className="font-medium underline" href={`/trips/${encodeURIComponent(popup.tripId)}`}>{popup.title}</a>
+    <Link ref={link} className="font-medium underline" to={`/trips/${encodeURIComponent(popup.tripId)}`}>{popup.title}</Link>
     <p>{popup.count} photos at this location</p>
     <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
   </div>;

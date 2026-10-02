@@ -85,38 +85,15 @@ test('color update reports RLS zero-row results and rejects invalid colors befor
   await assert.rejects(api.updateTripColor('trip', '#123456'), /could not be updated/);
 });
 
-test('uploads persist extracted coordinates and clean up storage on metadata insertion failure', async () => {
-  let inserted, removed = 0;
-  const db = { from() { return { insert(value) { inserted = value; return { error: new Error('Insert denied') }; } }; }, storage: { from() { return { upload: async () => ({ error: null }), remove: async () => { removed++; return { error: null }; } }; } } };
-  const api = dataApi(db, async () => ({ latitude: 0, longitude: -73 }));
-  await assert.rejects(api.uploadPhoto({ id: 'trip', group_id: 'group' }, 'member', { type: 'image/jpeg', size: 100 }), /Insert denied/);
-  assert.equal(inserted.latitude, 0); assert.equal(inserted.longitude, -73); assert.equal(removed, 1);
-});
-
-function deletionFixture({ owner = 'me', storageError = null, rows = [{ id: 'photo' }] } = {}) {
+test('published deletion uses trusted identity-only API and surfaces failure', async () => {
   const calls = [];
-  const db = { auth: { getUser: async () => ({ data: { user: { id: 'me' } }, error: null }) }, from() { return {
-    select() { return this; }, eq() { return this; }, single() { return { data: { id: 'photo', uploaded_by: owner, storage_path: 'canonical/path' }, error: null }; },
-    delete() { calls.push('record'); return { eq() { return this; }, select() { return this; }, single() { return { data: rows[0] ?? null, error: null }; } }; },
-  }; }, storage: { from() { return { remove: async paths => { calls.push(paths[0]); return { data: [{ name: 'canonical/path' }], error: storageError }; } }; } } };
-  return { api: dataApi(db), calls };
-}
-
-test('deletion checks owner and removes canonical storage object before record', async () => {
-  const denied = deletionFixture({ owner: 'other' });
-  await assert.rejects(denied.api.deletePhoto('photo'), /Only the uploader/);
-  assert.deepEqual(denied.calls, []);
-  const allowed = deletionFixture(); await allowed.api.deletePhoto('photo');
-  assert.deepEqual(allowed.calls, ['canonical/path', 'record']);
-});
-
-test('deletion preserves record on storage errors, handles missing files, and reports partial failures', async () => {
-  const failed = deletionFixture({ storageError: new Error('Offline') });
-  await assert.rejects(failed.api.deletePhoto('photo'), /Offline/); assert.equal(failed.calls.length, 1);
-  const retry = deletionFixture({ storageError: { code: 'ObjectNotFound' } });
-  await retry.api.deletePhoto('photo'); assert.equal(retry.calls.length, 2);
-  const partial = deletionFixture({ rows: [] });
-  await assert.rejects(partial.api.deletePhoto('photo'), /Retry to finish cleanup/);
+  const api = dataApi({ functions: { invoke: async (name, options) => {
+    calls.push([name, options.body]); return { data: {}, error: null };
+  } } });
+  await api.deletePhoto('photo');
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['photo-upload', { action: 'delete', id: 'photo' }]]);
+  const failed = dataApi({ functions: { invoke: async () => ({ data: null, error: new Error('Offline') }) } });
+  await assert.rejects(failed.deletePhoto('photo'), /Offline/);
 });
 
 test('thumbnail downloads are bounded and stale results never allocate private URLs', async () => {

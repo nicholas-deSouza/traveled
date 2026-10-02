@@ -1,0 +1,7 @@
+project_id = "traveled"
+
+[functions.photo-upload]
+verify_jwt = false # Handler validates the JWT with Auth /user on every request.
+
+[functions.photo-upload-worker]
+verify_jwt = false # Dedicated secret bearer token, never exposed to the browser.

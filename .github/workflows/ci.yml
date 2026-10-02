@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    # main is this repository's default branch. Feature branches run via PRs.
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -14,19 +16,95 @@ concurrency:
 
 jobs:
   checks:
-    name: Lint and build
+    name: Tests, lint and build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      upload_database: ${{ steps.changes.outputs.upload_database }}
+      classifier_artifact: ${{ steps.changes.outputs.classifier_artifact }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: pnpm
+      - name: Select upload validation jobs
+        id: changes
+        run: node scripts/ci-upload-changes.mjs
       - run: pnpm install --frozen-lockfile
-      - run: node --test .github/scripts/greploop.test.mjs eslint-rules/no-direct-dom.test.mjs
+      - run: pnpm test
+      - run: node --test eslint-rules/no-direct-dom.test.mjs
       - run: pnpm lint
       - run: pnpm build
+
+  upload-database:
+    name: Upload SQL and real Storage gates
+    needs: checks
+    if: needs.checks.outputs.upload_database == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.81.3
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.5.2
+      - run: deno check supabase/functions/photo-upload/index.ts supabase/functions/photo-upload-worker/index.ts
+      - name: Start an empty disposable Supabase
+        run: |
+          supabase --help >/dev/null
+          supabase start --help >/dev/null
+          mkdir -p "$RUNNER_TEMP/upload-ci/supabase"
+          cp supabase/config.toml "$RUNNER_TEMP/upload-ci/supabase/config.toml"
+          supabase start --workdir "$RUNNER_TEMP/upload-ci" >/dev/null
+      - name: Apply schema and run SQL/Storage assertions
+        run: |
+          set +x
+          status_json=$(supabase status --workdir "$RUNNER_TEMP/upload-ci" --output json)
+          export UPLOAD_TEST_URL=$(jq -r .API_URL <<< "$status_json")
+          export UPLOAD_TEST_SERVICE_KEY=$(jq -r .SERVICE_ROLE_KEY <<< "$status_json")
+          export UPLOAD_TEST_ANON_KEY=$(jq -r .ANON_KEY <<< "$status_json")
+          echo "::add-mask::$UPLOAD_TEST_SERVICE_KEY"
+          echo "::add-mask::$UPLOAD_TEST_ANON_KEY"
+          db_url=$(jq -r .DB_URL <<< "$status_json")
+          node scripts/prepare-fresh-schema.mjs | psql "$db_url" -v ON_ERROR_STOP=1 >/dev/null
+          psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload.sql >/dev/null
+          psql "$db_url" -v ON_ERROR_STOP=1 -c 'update upload_private.settings set admission_enabled=true' >/dev/null
+          node scripts/check-upload-storage.mjs
+      - name: Stop disposable services
+        if: always()
+        run: supabase stop --workdir "$RUNNER_TEMP/upload-ci" >/dev/null
+
+  classifier-artifact:
+    name: Classifier and Linux native artifact
+    needs: checks
+    if: needs.checks.outputs.classifier_artifact == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # Packaging requires the reviewed package lock; absence is a release failure.
+      - name: Build and smoke-test the Lambda ZIP contents
+        run: |
+          mkdir -p infrastructure/photo-classifier/dist/lambda
+          docker run --rm --platform linux/amd64 --entrypoint node \
+            -v "$PWD:/workspace:ro" \
+            -v "$PWD/infrastructure/photo-classifier/dist/lambda:/artifact" \
+            public.ecr.aws/sam/build-nodejs24.x \
+            /workspace/infrastructure/photo-classifier/build-artifact.mjs /artifact

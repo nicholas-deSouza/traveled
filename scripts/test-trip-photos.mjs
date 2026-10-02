@@ -90,84 +90,29 @@ test('invalid pages are rejected before querying', async () => {
   assert.equal(calls.tables.length, 0);
 });
 
-function deletionFixture({ owner = 'member', storageError = null, metadataError = null, deleted = { id: 'photo' }, removed = [{ name: 'group/trip/photo.jpg' }], exists = false, existsError = null } = {}) {
+function deletionFixture({ error = null, data = {} } = {}) {
   const calls = [];
-  let deleting = false;
-  const db = {
-    auth: { getUser: async () => ({ data: { user: { id: 'member' } }, error: null }) },
-    from(table) {
-      assert.equal(table, 'photos');
-      return {
-        select() { return this; },
-        eq(key, value) { calls.push(['filter', key, value]); return this; },
-        delete() { deleting = true; calls.push('metadata'); return this; },
-        single: async () => deleting
-          ? { data: deleted, error: metadataError }
-          : { data: { id: 'photo', storage_path: 'group/trip/photo.jpg', uploaded_by: owner }, error: null },
-      };
-    },
-    storage: { from(bucket) {
-      assert.equal(bucket, 'trip-photos');
-      return { exists: async () => ({ data: exists, error: existsError }), remove: async paths => { calls.push(['storage', ...paths]); return { data: removed, error: storageError }; } };
-    } },
-  };
+  const db = { functions: { invoke: async (name, options) => {
+    calls.push([name, options.body]); return { data, error };
+  } } };
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: () => ({ supabase: db }) });
   return { api: exports, calls };
 }
 
-test('deletion removes the trusted file before uploader-filtered metadata', async () => {
+test('deletion uses authenticated trusted API with only photo identity', async () => {
   const { api, calls } = deletionFixture();
   await api.deletePhoto('photo');
-  assert.deepEqual(calls, [
-    ['filter', 'id', 'photo'], ['storage', 'group/trip/photo.jpg'],
-    'metadata', ['filter', 'id', 'photo'], ['filter', 'uploaded_by', 'member'],
-  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['photo-upload', { action: 'delete', id: 'photo' }]]);
 });
 
-test('storage failure preserves metadata', async () => {
-  const { api, calls } = deletionFixture({ storageError: { message: 'Storage denied', code: 'AccessDenied' } });
-  await assert.rejects(api.deletePhoto('photo'), { message: 'Storage denied' });
-  assert.equal(calls.includes('metadata'), false);
-});
-
-test('metadata failure reports partial deletion and a retry', async () => {
-  const { api } = deletionFixture({ metadataError: { message: 'Network failure' } });
-  await assert.rejects(api.deletePhoto('photo'), /file was removed.*Retry to finish cleanup.*Network failure/);
-});
-
-test('retry cleans metadata when storage file is absent', async () => {
-  for (const options of [{ removed: [] }, { storageError: { code: 'NoSuchKey' } }, { storageError: { code: 'ObjectNotFound' } }]) {
+test('deletion failures remain visible and can retry the same identity', async () => {
+  for (const options of [{ error: new Error('Access denied') }, { data: { error: 'Access denied' } }]) {
     const { api, calls } = deletionFixture(options);
-    await api.deletePhoto('photo');
-    assert.equal(calls.includes('metadata'), true);
+    await assert.rejects(api.deletePhoto('photo'), /Access denied/);
+    assert.equal(calls.length, 1);
   }
 });
-
-test('other members cannot invoke deletion through the helper', async () => {
-  const { api, calls } = deletionFixture({ owner: 'someone-else' });
-  await assert.rejects(api.deletePhoto('photo'), /Only the uploader/);
-  assert.equal(calls.length, 1);
-});
-
-test('zero deleted rows never reports success', async () => {
-  const { api } = deletionFixture({ deleted: null });
-  await assert.rejects(api.deletePhoto('photo'), /Deletion was denied/);
-});
-
-
-test('silently skipped storage deletion never orphans an existing file', async () => {
-  const { api, calls } = deletionFixture({ removed: [], exists: true });
-  await assert.rejects(api.deletePhoto('photo'), /file could not be removed/);
-  assert.equal(calls.includes('metadata'), false);
-});
-
-test('failed missing-file verification leaves metadata available for retry', async () => {
-  const { api, calls } = deletionFixture({ removed: [], existsError: { message: 'Network unavailable' } });
-  await assert.rejects(api.deletePhoto('photo'), { message: 'Network unavailable' });
-  assert.equal(calls.includes('metadata'), false);
-});
-
 
 test('refresh after deletion reuses remaining images and downloads only the next photo', async () => {
   const initial = fixture();

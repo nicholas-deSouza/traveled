@@ -9,11 +9,12 @@
     "build": "tsc -b && vite build",
     "lint": "eslint . --max-warnings=0",
     "preview": "vite preview",
-    "test": "pnpm test:components:check && pnpm test:unit && pnpm test:scripts",
+    "test": "pnpm test:components:check && pnpm test:unit && pnpm test:scripts && pnpm test:classifier",
     "test:components:check": "node scripts/check-component-tests.mjs",
     "test:unit": "vitest run",
     "test:watch": "vitest",
-    "test:scripts": "node --test scripts/test-*.mjs .github/scripts/*.test.mjs"
+    "test:scripts": "node --test scripts/test-*.mjs .github/scripts/*.test.mjs",
+    "test:classifier": "npm test --prefix infrastructure/photo-classifier"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.1.2",
@@ -26,7 +27,11 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.1",
-    "tailwind-merge": "^2.5.5"
+    "tailwind-merge": "^2.5.5",
+    "libheif-js": "1.23.2",
+    "nsfwjs": "4.4.0",
+    "@tensorflow/tfjs": "4.22.0",
+    "buffer": "6.0.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

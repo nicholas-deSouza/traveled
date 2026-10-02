@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
+import type { ReactNode } from 'react';
 import { RequireAuth } from './RequireAuth';
 
 const auth = vi.hoisted(() => ({ getSession: vi.fn(), unsubscribe: vi.fn() }));
@@ -8,6 +9,7 @@ vi.mock('../../lib/supabase', () => ({ supabase: { auth: {
   getSession: auth.getSession,
   onAuthStateChange: () => ({ data: { subscription: { unsubscribe: auth.unsubscribe } } }),
 } } }));
+vi.mock('../photos/PhotoUploadProvider', () => ({ PhotoUploadProvider: ({ children }: { children: ReactNode }) => children }));
 function mount() {
   return render(<MemoryRouter initialEntries={['/groups']}><Routes>
     <Route element={<RequireAuth />}><Route path="/groups" element={<p>Private groups</p>} /></Route>
