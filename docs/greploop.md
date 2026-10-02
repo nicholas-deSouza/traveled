@@ -106,8 +106,12 @@ merging is manual.
   before publishing; remove it to stop future attempts and cancel an active run
   in Actions if needed.
 - After a successful push, only thread IDs Codex reports fixed, belonging to
-  files in the patch, are resolved. False positives and unclear findings stay
-  unresolved. The controller does not infer resolution just from an old thread.
+  files in the patch, receive a reply explaining the issue, the specific fix, and
+  verification performed, with a link to the published fix commit. Each thread is
+  resolved only after its reply succeeds. Missing, blank, duplicate, or unrelated
+  explanations fail validation before publishing. False positives and unclear
+  findings stay unresolved. Summary-only findings are explained in the attempt
+  report. The controller does not infer resolution just from an old thread.
 - A 5/5 score with zero unresolved Greptile threads ends the loop. No merge is
   performed. Automatic merging requires a separate, explicit configuration.
 
@@ -157,26 +161,32 @@ as well if your organization requires all actions to be immutable.
   artifacts are retained for seven days.
 - **Push rejected:** a human updated the branch or a branch rule prevented the
   App from pushing. Do not bypass protections; rebase/fix the PR normally.
-- **Thread resolution failed after push:** the validated commit is already on
-  the branch. Resolve verified findings manually, then let the next review run.
+- **Reply or thread resolution failed after push:** the validated commit is already
+  on the branch. The attempt report identifies that commit and asks for maintainer
+  attention. Inspect the logs, post any missing fix explanations, and resolve
+  verified findings manually, then let the next review run. A failed reply leaves
+  its thread unresolved; earlier successful replies/resolutions are retained.
 
 ## Local verification
 
 ```sh
 pnpm install --frozen-lockfile
 node --test .github/scripts/greploop.test.mjs
+pnpm test
 pnpm lint
 pnpm build
 ```
 
-The automation tests use Node's built-in test runner. There is still no application
-test script. They cover review freshness, bot identity, patch policy, attempt
-history, and concurrency checks. A real GitHub run is still needed to verify your
+The automation tests use Node's built-in test runner and also run through
+`pnpm test`. They cover review freshness, bot identity, patch policy, attempt
+history, concurrency checks, fix explanations, and reply-before-resolution ordering.
+A real GitHub run is still needed to verify your
 Greptile installation's payload format, credentials, and repository protections.
 
 References: [Codex GitHub Action](https://developers.openai.com/codex/github-action/),
 [Greptile configuration](https://www.greptile.com/docs/code-review/greptile-config-reference),
 [GitHub workflow triggers](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+Thread replies use GitHub's [addPullRequestReviewThreadReply mutation](https://docs.github.com/en/graphql/reference/pulls#addpullrequestreviewthreadreply).
 
 ## Visible run status
 

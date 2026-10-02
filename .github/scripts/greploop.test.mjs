@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { allowedPath, validateResult } from './greploop-patch.mjs';
-import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice } from './greploop.mjs';
+import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice, resolveAddressed } from './greploop.mjs';
 
 // All fixture subprocesses must be isolated from the committing repository.
 function exec(command, args, options = {}) {
@@ -96,10 +96,82 @@ test('patch scope blocks credentials, workflows, config, traversal and instructi
 
 test('thread resolution only accepts snapshot IDs whose files changed', () => {
   const snapshot = { threads: [{ id: 't1', path: 'src/App.tsx' }] };
-  const result = { summary: 'Fixed', remainingIssues: [], addressedThreadIds: ['t1'] };
+  const result = { summary: 'Fixed', remainingIssues: [], addressedThreadIds: ['t1'], threadReplies: [{ threadId: 't1', body: 'Handle the missing value before rendering.' }] };
   assert.deepEqual(validateResult(result, snapshot, ['src/App.tsx']), ['t1']);
   assert.throws(() => validateResult(result, snapshot, ['src/other.ts']));
   assert.throws(() => validateResult({ ...result, addressedThreadIds: ['fake'] }, snapshot, ['src/App.tsx']));
+});
+
+test('every fixed thread requires exactly one bounded explanation for a known addressed ID', () => {
+  const snapshot = { threads: [{ id: 't1', path: 'src/App.tsx' }, { id: 't2', path: 'src/App.tsx' }] };
+  const reply = { threadId: 't1', body: 'Handle the missing value before rendering.' };
+  const result = { summary: 'Fixed', remainingIssues: [], addressedThreadIds: ['t1'], threadReplies: [reply] };
+  for (const threadReplies of [undefined, null, {}, [], [null], [reply, reply],
+    [{ ...reply, threadId: 'fake' }], [{ ...reply, threadId: 't2' }],
+    [{ ...reply, body: '' }], [{ ...reply, body: ' \n\t ' }], [{ ...reply, body: 1 }],
+    [{ ...reply, body: 'x'.repeat(6001) }]]) {
+    assert.throws(() => validateResult({ ...result, threadReplies }, snapshot, ['src/App.tsx']));
+  }
+  assert.throws(() => validateResult({ ...result, addressedThreadIds: [1] }, snapshot, ['src/App.tsx']));
+  assert.throws(() => validateResult({ ...result, addressedThreadIds: ['fake'], threadReplies: [{ ...reply, threadId: 'fake' }] }, snapshot, ['src/App.tsx']));
+  assert.deepEqual(validateResult({ ...result, threadReplies: [{ ...reply, body: 'x'.repeat(6000) }] }, snapshot, ['src/App.tsx']), ['t1']);
+  assert.deepEqual(validateResult({ ...result, addressedThreadIds: [], threadReplies: [] }, snapshot, ['src/App.tsx']), []);
+});
+
+test('publisher replies to each fixed finding with the published commit before resolving it', async () => {
+  const snapshot = { number: 9, sha, threads: [{ id: 't1' }, { id: 't2' }, { id: 'unfixed' }] };
+  const publishedSha = 'b'.repeat(40);
+  const context = { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com' };
+  const result = { summary: 'Overall report', remainingIssues: ['Unfixed finding'], addressedThreadIds: ['t1', 't2'],
+    threadReplies: [{ threadId: 't1', body: 'Guard missing values. Regression test passes. @someone <img>' },
+      { threadId: 't2', body: 'Cancel the pending request when unmounting.' }] };
+  const calls = [];
+  const github = { graphql: async (query, variables) => calls.push({ query, ...variables }) };
+  await resolveAddressed({ github, context }, snapshot, result, publishedSha);
+  assert.equal(calls.length, 4);
+  for (const [index, id] of [[0, 't1'], [2, 't2']]) {
+    assert.equal(calls[index].id, id);
+    assert.match(calls[index].query, /addPullRequestReviewThreadReply\(input:\{pullRequestReviewThreadId:\$id,body:\$body\}\)/);
+    assert.match(calls[index].body, /Greploop: Fixed/);
+    assert.ok(calls[index].body.includes(`https://github.com/owner/repo/commit/${publishedSha}`));
+    assert.doesNotMatch(calls[index].body, /Overall report|Unfixed finding|@someone|<img>/);
+    assert.equal(calls[index + 1].id, id);
+    assert.match(calls[index + 1].query, /resolveReviewThread/);
+  }
+  assert.match(calls[0].body, /Guard missing values\. Regression test passes\./);
+  assert.match(calls[2].body, /Cancel the pending request/);
+});
+
+test('publisher validates all replies and the fix SHA before any GitHub mutation', async () => {
+  const snapshot = { sha, threads: [{ id: 't1' }] };
+  const result = { summary: 'Fixed', remainingIssues: [], addressedThreadIds: ['t1'],
+    threadReplies: [{ threadId: 't1', body: 'Guard missing values.' }] };
+  let mutations = 0;
+  const github = { graphql: async () => { mutations++; } };
+  for (const publishedSha of [undefined, sha, 'not-a-commit']) {
+    await assert.rejects(resolveAddressed({ github }, snapshot, result, publishedSha), /published fix commit/);
+  }
+  await assert.rejects(resolveAddressed({ github }, snapshot, { ...result,
+    threadReplies: [...result.threadReplies, { threadId: 'fake', body: 'Do not post this.' }],
+  }, 'b'.repeat(40)));
+  assert.equal(mutations, 0);
+});
+
+test('a failed reply leaves its finding unresolved and a failed resolution stops further replies', async () => {
+  const snapshot = { sha, threads: [{ id: 't1' }, { id: 't2' }] };
+  const context = { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com' };
+  const result = { summary: 'Fixed', remainingIssues: [], addressedThreadIds: ['t1', 't2'],
+    threadReplies: [{ threadId: 't1', body: 'Guard missing values.' }, { threadId: 't2', body: 'Cancel pending requests.' }] };
+  for (const failedMutation of ['addPullRequestReviewThreadReply', 'resolveReviewThread']) {
+    const calls = [];
+    const github = { graphql: async (query, variables) => {
+      calls.push({ query, ...variables });
+      if (query.includes(failedMutation)) throw new Error('GitHub rejected the mutation');
+    } };
+    await assert.rejects(resolveAddressed({ github, context }, snapshot, result, 'b'.repeat(40)), /GitHub rejected/);
+    assert.equal(calls.length, failedMutation === 'addPullRequestReviewThreadReply' ? 1 : 2);
+    assert.ok(calls.every((call) => call.id === 't1'));
+  }
 });
 
 test('intake collects paginated threads, reserves one attempt and ignores the duplicate event', async () => {
@@ -167,7 +239,7 @@ test('patch exports and applies in a fresh checkout; deleted files are rejected'
   const result = join(temp, 'result.json');
   const artifact = join(temp, 'artifact');
   writeFileSync(snapshot, JSON.stringify({ threads: [] }));
-  writeFileSync(result, JSON.stringify({ summary: 'Fixed', addressedThreadIds: [], remainingIssues: [] }));
+  writeFileSync(result, JSON.stringify({ summary: 'Fixed', addressedThreadIds: [], threadReplies: [], remainingIssues: [] }));
   writeFileSync(join(source, 'src/app.ts'), 'export const count = 2;\n');
   const script = resolve('.github/scripts/greploop-patch.mjs');
   exec(process.execPath, [script, 'export', source, fixtureSha, snapshot, result, artifact]);
@@ -212,6 +284,11 @@ test('final status updates the reservation for blocked, failed, cancelled and pu
     assert.doesNotMatch(comments[0].body, /@someone|<img>/);
     assert.deepEqual(attemptsFrom(comments), [sha]);
   }
+  await finishAttempt({ github, context, core }, snapshot, { publish: 'failure' }, {}, 'b'.repeat(40));
+  assert.match(comments[0].body, /validated fix was pushed as b{40}/);
+  assert.match(comments[0].body, /posting fix replies or resolving threads failed/);
+  await finishAttempt({ github, context, core }, snapshot, { publish: 'failure' }, { publishedSha: 'b'.repeat(40) });
+  assert.doesNotMatch(comments[0].body, /validated fix was pushed/);
 });
 
 test('no patch and forbidden configuration produce a maintainer report without an exportable patch', () => {
@@ -227,7 +304,7 @@ test('no patch and forbidden configuration produce a maintainer report without a
   const result = join(temp, 'result.json');
   const output = join(temp, 'output');
   writeFileSync(snapshot, JSON.stringify({ threads: [] }));
-  writeFileSync(result, JSON.stringify({ summary: 'Blocked', addressedThreadIds: [], remainingIssues: ['Config requires maintainer changes'] }));
+  writeFileSync(result, JSON.stringify({ summary: 'Blocked', addressedThreadIds: [], threadReplies: [], remainingIssues: ['Config requires maintainer changes'] }));
   const script = resolve('.github/scripts/greploop-patch.mjs');
   for (const changed of [false, true]) {
     if (changed) writeFileSync(join(source, 'eslint.config.js'), 'export default [{}];\n');
@@ -268,6 +345,16 @@ test('write-capable reporting job uses only immutable action revisions', () => {
   const actions = [...report.matchAll(/uses:\s*(\S+)/g)].map((match) => match[1]);
   assert.ok(actions.length > 0);
   for (const action of actions) assert.match(action, /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/, `${action} must be pinned`);
+});
+
+test('workflow replies only after a successful push and retains the published SHA for failure reporting', () => {
+  const workflow = readFileSync('.github/workflows/greploop.yml', 'utf8');
+  const push = workflow.indexOf("'push', 'origin'");
+  const output = workflow.indexOf("core.setOutput('sha', publishedSha)");
+  const reply = workflow.indexOf('await resolveAddressed({ github, context }, snapshot, result, publishedSha)');
+  assert.ok(push > 0 && output > push && reply > output);
+  assert.match(workflow, /sha: \$\{\{ steps\.publish\.outputs\.sha \}\}/);
+  assert.match(workflow, /jobs, result, needs\.publish\.outputs\.sha\)/);
 });
 
 
