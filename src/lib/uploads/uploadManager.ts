@@ -398,9 +398,10 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
         try { await request({ action: 'retry', id }); }
         catch (error) {
           const message = error instanceof Error ? error.message : '';
-          if (!(item.phase === 'original_upload' && files.has(id) && /^(?:Submission access denied|Unknown submission)$/.test(message))) throw error;
+          if (!(item.phase === 'original_upload' && value && !value.originalAcknowledged && /^(?:Submission access denied|Unknown submission)$/.test(message))) throw error;
           // No server stage exists for this exhausted pending admission. The next
           // leader grant retries its original stable admission instead of inventing an ID.
+          if (!files.has(id)) local(id, 'needs_file');
         }
       });
     },

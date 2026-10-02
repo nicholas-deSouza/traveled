@@ -289,6 +289,30 @@ describe('upload lifecycle', () => {
     unavailable = false; await manager.retry(item.id); await vi.advanceTimersByTimeAsync(2000); await flush();
     expect(server.get(item.id)?.phase).toBe('original_check'); vi.restoreAllMocks();
   });
+  it.each(['Unknown submission', 'Submission access denied'])('resumes a never-admitted failed upload after reload when retry returns %s', async (message) => {
+    vi.useFakeTimers();
+    const { manager, store, dependencies, server, requests } = harness();
+    const pending = submission({ id: 'failed-before-reload' });
+    await store.put({ submission: pending, admissionRequest: 'stable-admission', candidateRequest: null,
+      originalAcknowledged: false, localFailed: true, localError: 'Admission unavailable',
+      localFailureGeneration: 0, localFailureStage: 'original_upload' });
+    const original = dependencies.api.request;
+    dependencies.api.request = vi.fn(async (body) => {
+      if (body.action === 'retry' && !server.has(body.id)) throw new UploadApiError(message, 403);
+      return original(body);
+    });
+    manager.start(); await flush();
+    expect(manager.getSnapshot().items[0].local_status).toBe('failed');
+    await manager.retry(pending.id);
+    expect(manager.getSnapshot().items[0].local_status).toBe('needs_file');
+    expect(store.values.get(pending.id)?.localFailed).toBe(false);
+    await expect(manager.reselect(pending.id, new File(['wrong'], 'photo.jpg'))).rejects.toThrow('same original');
+    await manager.reselect(pending.id, new File(['abc'], 'reselected.jpg'));
+    await vi.advanceTimersByTimeAsync(2000); await flush();
+    expect(requests).toContainEqual({ action: 'admit', id: pending.id, request_id: 'stable-admission',
+      trip_id: 'trip', filename: 'reselected.jpg', source_sha256: 'sha', source_bytes: 3 });
+    expect(server.get(pending.id)?.phase).toBe('original_check');
+  });
   it('cancels an unadmitted identity through the server tombstone and never starts its original work', async () => {
     vi.useFakeTimers();
     const { manager, dependencies, server } = harness();
