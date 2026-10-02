@@ -357,6 +357,19 @@ test('workflow replies only after a successful push and retains the published SH
   assert.match(workflow, /jobs, result, needs\.publish\.outputs\.sha\)/);
 });
 
+test('independent validation requires the full test suite before publishing', () => {
+  const workflow = readFileSync('.github/workflows/greploop.yml', 'utf8');
+  const validate = workflow.match(/^ {2}validate:\n([\s\S]*?)(?=^ {2}publish:)/m)?.[1];
+  assert.ok(validate, 'Independent validation job must be present');
+  const testStep = validate.match(/^ {6}- run: pnpm test\n([\s\S]*?)(?=^ {6}- |(?![\s\S]))/m)?.[1];
+  assert.ok(testStep, 'Validation must run pnpm test');
+  assert.match(testStep, /working-directory: source/);
+  assert.doesNotMatch(testStep, /continue-on-error:|if:/);
+  assert.ok(validate.indexOf('pnpm install --frozen-lockfile') < validate.indexOf('pnpm test'));
+  assert.ok(validate.indexOf('pnpm test') < validate.indexOf('pnpm lint'));
+  assert.match(workflow, /^ {2}publish:\n[\s\S]*?needs: \[intake, validate\]/m);
+});
+
 
 test('repository fixtures are safe inside a Git hook', () => {
   const parent = mkdtempSync(join(tmpdir(), 'traveled-greploop-hook-'));

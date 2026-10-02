@@ -35,7 +35,8 @@ merging is manual.
 
    Enter credentials directly in GitHub, never in source files, PR comments, or
    chat. CI uses GitHub Actions secrets; it does not need a committed `.env` file
-   or Supabase credentials. These jobs lint and compile the application only.
+   or Supabase credentials. These jobs run local tests, lint, and compile the
+   application.
 
 4. In **Settings → Actions → General**, enable Actions and permit the actions used
    by these workflows: `actions/*`, `pnpm/action-setup`, and `openai/codex-action`.
@@ -95,9 +96,10 @@ merging is manual.
   can be published. Maximum: 30 files / 1 MiB patch. Deletions, symlinks, workflow
   changes, agent instructions, dependency/config changes, and database migrations
   require a maintainer. This is enforced in code, not just in the prompt.
-- Codex runs without the publishing App credential. Its patch is applied and
-  linted/built on a fresh runner. A third runner checks the same immutable patch
-  again before getting the publishing credential; it never installs dependencies
+- Codex runs without the publishing App credential. Its patch is applied on a
+  fresh runner, which runs `pnpm test`, `pnpm lint`, and `pnpm build`. A test failure
+  blocks publishing, even if Codex's own verification passed. A third runner checks
+  the same immutable patch again before getting the publishing credential; it never installs dependencies
   or executes PR application code. PR authors still need to be trusted because
   the fix job executes their checkout and has OpenAI API access.
 - The publisher rechecks the SHA and opt-in before pushing. It uses a regular

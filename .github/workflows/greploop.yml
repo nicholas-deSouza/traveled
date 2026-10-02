@@ -163,6 +163,8 @@ jobs:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
         working-directory: source
+      - run: pnpm test
+        working-directory: source
       - run: pnpm lint
         working-directory: source
       - run: pnpm build
