@@ -14,9 +14,11 @@ Every deployment leaves upload admission **paused**, including failed runs. It d
 
 ## One-time configuration
 
+The operator selected account `905418433781` and region `us-east-1`. Prepared role policies and exact console steps are in [AWS access setup](../infrastructure/photo-classifier/access/README.md). GitHub settings supplied by the operator confirm the repository's immutable OIDC subject below. The AWS trust update is operator-reported complete; successful live role assumption remains a deployment check.
+
 1. Create/choose an AWS account and region. Create the Sightengine account and verify access to the accepted moderation model and allowance.
-2. In AWS Secrets Manager, create a secret in that region containing JSON keys `SUPABASE_SERVICE_ROLE_KEY`, `SIGHTENGINE_API_USER`, and `SIGHTENGINE_API_SECRET`. Enter values in the service console; never paste them into chat or source files. Save its ARN. Supabase supplies the service role key to its hosted Edge runtime automatically; the Lambda needs this separate copy.
-3. Create an AWS IAM deployment role trusted by GitHub OIDC. Its trust must restrict `aud` to `sts.amazonaws.com` and `sub` to `repo:nicholas-deSouza/traveled:environment:photo-upload-production`. Give it the deployment permissions required by SAM/CloudFormation for this stack, its artifact S3 bucket, Lambda, the Lambda execution role/`iam:PassRole`, CloudWatch Logs and reading the specific classifier secret. Scope resource permissions to this application wherever AWS supports resource scoping; do not use this role as the Edge invocation principal. See [AWS SAM on GitHub](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/deploying-using-github.html) and [GitHub AWS OIDC setup](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
+2. In AWS Secrets Manager, create secret `traveled/photo-classifier` in that region containing JSON keys `SUPABASE_SECRET_KEY`, `SIGHTENGINE_API_USER`, and `SIGHTENGINE_API_SECRET`. The Supabase value must be the backend key starting with `sb_secret_`. Enter values in the service console; never paste them into chat or source files. Save its ARN. Hosted Edge Functions use the `default` key in Supabase's automatically supplied `SUPABASE_SECRET_KEYS` JSON dictionary; confirm it exists in the project's Edge Function secrets. Lambda needs this separate single-key copy in AWS. See [Supabase's migration instructions](https://supabase.com/docs/guides/getting-started/migrating-to-new-api-keys).
+3. Create an AWS IAM deployment role trusted by GitHub OIDC, using the prepared [trust policy](../infrastructure/photo-classifier/access/github-trust-name-format.json). Its trust must restrict `aud` to `sts.amazonaws.com` and `sub` to `repo:nicholas-deSouza@64615525/traveled@1358355406:environment:photo-upload-production`. Give it the deployment permissions required by SAM/CloudFormation for this stack, its artifact S3 bucket, Lambda, the Lambda execution role/`iam:PassRole`, CloudWatch Logs and reading the specific classifier secret. Scope resource permissions to this application wherever AWS supports resource scoping; do not use this role as the Edge invocation principal. See [AWS SAM on GitHub](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/deploying-using-github.html) and [GitHub AWS OIDC setup](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
 4. Create a separate durable IAM access key for the Edge runtime with only `lambda:InvokeFunction` on the classifier. Before the first deployment, the function ARN is not known. You can provision the key first without invocation access: the initial workflow creates the stack and stops at DryRun. Read `ClassifierArn` in CloudFormation stack outputs, grant invocation on that exact ARN, and rerun the workflow. Preserve the stack name on later deployments so the function ARN remains stable.
 5. In GitHub repository **Settings → Environments**, create `photo-upload-production`. Restrict deployment branches to `main`. Populate the variables and secrets below. If you add required reviewers, a workflow will wait for their approval before deployment.
 
@@ -39,7 +41,9 @@ Environment secrets:
 | `PHOTO_CLASSIFIER_AWS_ACCESS_KEY_ID` | The separate durable IAM invocation key (`AKIA…`) |
 | `PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY` | That invocation key's secret |
 
-Temporary AWS session keys are deliberately rejected: a persisted session key expires and would stop the worker. GitHub itself uses short-lived OIDC credentials for deployment. The workflow clears any old Edge session token. Use a controlled credential rotation process when changing the invocation key, worker token or classifier secret. CloudFormation dynamic secret references are resolved when the function configuration is updated; simply changing the Secrets Manager value does not guarantee an unchanged stack refreshes the Lambda environment.
+These credentials serve separate purposes. GitHub OIDC obtains short-lived AWS deployment credentials. The Edge worker's dedicated AWS access key signs Lambda invocations. Supabase's modern backend `sb_secret_` key replaces the legacy `service_role` API key for privileged Supabase requests; that migration does not replace GitHub OIDC or the worker's AWS key. `SUPABASE_ACCESS_TOKEN` is a separate Supabase management token used by the deployment workflow.
+
+Temporary AWS session keys are deliberately rejected for the persisted Edge worker credentials: a session key expires and would stop the worker. GitHub itself uses short-lived OIDC credentials for deployment. The workflow clears any old Edge session token. Use a controlled credential rotation process when changing the invocation key, worker token or classifier secret. CloudFormation dynamic secret references are resolved when the function configuration is updated; simply changing the Secrets Manager value does not guarantee an unchanged stack refreshes the Lambda environment.
 
 The Supabase configuration helper uses the documented [Management API query endpoint](https://supabase.com/docs/reference/api/v1-run-a-query), which is currently beta, with bound SQL parameters for Vault values, and the [bulk secrets endpoint](https://supabase.com/docs/reference/api/v1-bulk-create-secrets). Repeated runs update named Vault secrets and the existing Cron job; they do not add migrations or weaken RLS. Validate endpoint compatibility if Supabase changes those APIs.
 
@@ -59,9 +63,22 @@ Verify a real photo uploads and appears in the gallery. If rollout fails, leave 
 ## Setup checklist
 
 - [x] Apply the database migration (operator-reported complete).
-- [ ] Provision AWS/Sightengine accounts and the classifier secret.
-- [ ] Configure the deployment role, invocation key and GitHub environment.
+- [x] Choose AWS account `905418433781` and region `us-east-1`.
+- [x] Configure the GitHub OIDC provider, role `github-traveled-deploy` and policy `TraveledPhotoUploadDeploy` (operator-reported complete; live access not yet verified).
+- [x] Verify the repository's OIDC subject and update the role's trust relationship for `photo-upload-production`: `repo:nicholas-deSouza@64615525/traveled@1358355406:environment:photo-upload-production` (GitHub settings supplied by operator; AWS policy update operator-reported complete; live role assumption pending deployment).
+- [x] Create Sightengine account and obtain API credentials (operator-reported complete).
+- [x] Confirm both Sightengine `api_user` and `api_secret` are stored under the required AWS secret fields (operator-reported complete).
+- [x] Confirm Sightengine Free plan allowance: 500 operations per day and 2,000 per month (operator-reported complete; live `nudity-2.1` access remains a release check).
+- [x] Create Secrets Manager secret `traveled/photo-classifier` with the Supabase and Sightengine credentials (operator reported; values have not been inspected).
+- [x] Confirm the AWS secret fields are `SUPABASE_SECRET_KEY`, `SIGHTENGINE_API_USER`, and `SIGHTENGINE_API_SECRET`, with an `sb_secret_` Supabase value (operator-reported complete).
+- [x] Confirm the hosted Edge `SUPABASE_SECRET_KEYS` dictionary is listed (operator-reported complete; its `default` entry has not been inspected and will be validated by deployed runtime boot checks).
+- [x] Record the secret ARN in GitHub variable `PHOTO_CLASSIFIER_SECRET_ARN` (operator-reported complete).
+- [x] Create the separate Edge worker IAM invocation key and add its pair to GitHub environment secrets `PHOTO_CLASSIFIER_AWS_ACCESS_KEY_ID` and `PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY` (operator-reported complete; invocation permission remains pending until the classifier ARN is available).
+- [x] Create GitHub environment `photo-upload-production` and configure its deployment variables (operator-reported complete).
+- [x] Add GitHub environment secret `SUPABASE_ACCESS_TOKEN` (operator-reported complete).
+- [x] Add GitHub environment secret `PHOTO_UPLOAD_WORKER_TOKEN` (operator-reported complete).
+- [x] Restrict the GitHub environment's deployment branches to `main` (operator-reported complete).
 - [ ] Commit/review/merge the workflow and backend changes to `main`.
-- [ ] Run deployment; finish the exact-ARN invocation policy and rerun if bootstrapping.
-- [ ] Complete live release checks and deploy the frontend.
+- [ ] Run deployment; validate the Edge runtime's modern `default` Supabase key; finish the exact-ARN invocation policy and rerun if bootstrapping.
+- [ ] Complete live release checks, including a successful Sightengine `nudity-2.1` request, and deploy the frontend.
 - [ ] Enable admission and verify a real gallery upload.

@@ -3,16 +3,21 @@ export class ServiceError extends Error {
   constructor(message: string, readonly status = 500) { super(message); }
 }
 export interface RuntimeConfig {
-  url: string; serviceKey: string; workerToken: string;
+  url: string; supabaseSecretKey: string; workerToken: string;
   region: string; functionName: string; accessKey: string; secretKey: string; sessionToken?: string;
 }
 export type Fetcher = typeof fetch;
 export class UploadService {
   constructor(readonly config: RuntimeConfig, readonly fetcher: Fetcher = fetch) {}
-  async call(path: string, init: RequestInit = {}, bearer = this.config.serviceKey): Promise<unknown> {
+  async call(path: string, init: RequestInit = {}, bearer?: string): Promise<unknown> {
+    const headers = new Headers(init.headers);
+    headers.set('apikey', this.config.supabaseSecretKey);
+    headers.set('Content-Type', 'application/json');
+    headers.delete('Authorization');
+    if (bearer) headers.set('Authorization', `Bearer ${bearer}`);
     const response = await this.fetcher(`${this.config.url}${path}`, {
       ...init, signal: init.signal ?? AbortSignal.timeout(90_000),
-      headers: { apikey: this.config.serviceKey, Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json', ...init.headers },
+      headers,
     });
     const raw = await response.text();
     let body: unknown;
