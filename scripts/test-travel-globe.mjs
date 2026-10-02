@@ -37,6 +37,7 @@ function fixture(configuredStyle) {
     cancelAnimationFrame: () => { callback = undefined; },
     require: name => {
       if (name === 'react') return { useState: value => [typeof value === 'function' ? value() : value, () => {}], useRef: value => ({ current: value === null ? element : value }), useEffect: fn => { cleanup = fn(); } };
+      if (name === 'react-router-dom') return { Link: 'a' };
       if (name === 'react/jsx-runtime') return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
       if (name === 'maplibre-gl') return { default: { Map: function (options) { style = options.style; return map; }, NavigationControl: function () {} } };
       if (name.includes('button')) return { Button: 'button' };

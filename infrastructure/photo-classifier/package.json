@@ -1,0 +1,14 @@
+{
+  "name": "traveled-photo-classifier",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "smoke": "npm run build && node test/artifact-smoke.mjs"
+  },
+  "dependencies": { "sharp": "0.35.5", "libheif-js": "1.23.2" },
+  "devDependencies": { "@types/node": "24.10.1", "typescript": "5.7.3" }
+}

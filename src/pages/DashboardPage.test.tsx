@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
@@ -6,6 +6,7 @@ import { loadAtlas } from '../lib/groups';
 import { parisPhoto, parisTrip } from '../test/fixtures';
 import { TravelGlobe } from '../components/maps/TravelGlobe';
 import { DashboardPage } from './DashboardPage';
+import { notifyPhotoChanged } from '../lib/photoChanges';
 
 vi.mock('../components/maps/TravelGlobe', () => ({ TravelGlobe: vi.fn(() => <div aria-label="Globe" />) }));
 vi.mock('../lib/useSession', () => ({ useSession: () => ({ user: { id: 'member' } }) }));
@@ -37,4 +38,11 @@ it('retries a failed atlas load', async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Retry atlas' }));
   expect(await screen.findByText('Join or create a group to start your shared atlas.')).toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+it('refreshes the atlas after a trusted photo publication or deletion', async () => {
+  vi.mocked(loadAtlas).mockResolvedValue({ trips: [], photos: [] });
+  render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+  await screen.findByText('Join or create a group to start your shared atlas.');
+  act(() => notifyPhotoChanged('paris'));
+  await waitFor(() => expect(loadAtlas).toHaveBeenCalledTimes(2));
 });

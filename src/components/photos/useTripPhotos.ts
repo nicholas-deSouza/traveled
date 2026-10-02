@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorMessage, loadTripPhotos, releasePhotos, type Photo } from '../../lib/groups';
+import { PHOTO_CHANGED_EVENT } from '../../lib/photoChanges';
 
 type PhotoPage = Awaited<ReturnType<typeof loadTripPhotos>>;
 
@@ -7,6 +8,15 @@ type PhotoPage = Awaited<ReturnType<typeof loadTripPhotos>>;
 export function useTripPhotos(tripId: string, page: number) {
   const cache = useRef<Photo[]>([]);
   const [revision, setRevision] = useState(0);
+  const reload = useCallback(() => setRevision(value => value + 1), []);
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const changedTrip = (event as CustomEvent<{ tripId?: string }>).detail?.tripId;
+      if (!changedTrip || changedTrip === tripId) reload();
+    };
+    window.addEventListener(PHOTO_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(PHOTO_CHANGED_EVENT, refresh);
+  }, [tripId, reload]);
   const key = JSON.stringify([tripId, page]);
   const [result, setResult] = useState<{ key: string; data?: PhotoPage; error?: string }>();
   const [finished, setFinished] = useState('');
@@ -54,7 +64,7 @@ export function useTripPhotos(tripId: string, page: number) {
     error: current?.error,
     loading: !current && finished !== requestKey,
     refreshing: finished !== requestKey,
-    reload: () => setRevision(value => value + 1),
+    reload,
     removeLocal,
   };
 }

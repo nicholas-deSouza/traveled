@@ -2,6 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parisPhoto, parisTrip } from '../../test/fixtures';
+import { MemoryRouter } from 'react-router-dom';
 import { TravelGlobe } from './TravelGlobe';
 
 const map = vi.hoisted(() => ({
@@ -24,7 +25,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 it('plots located photos per trip and releases map resources on unmount', () => {
-  const { unmount } = render(<TravelGlobe {...atlas} />);
+  const { unmount } = render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   expect(screen.getByLabelText('Interactive globe with trip photo locations')).toBeInTheDocument();
   const onLoad = map.on.mock.calls.find(([event]) => event === 'style.load')![1];
   act(() => onLoad());
@@ -44,7 +45,7 @@ it('plots located photos per trip and releases map resources on unmount', () => 
 });
 
 it('opens an accessible trip popup and returns focus to the globe on close', async () => {
-  render(<TravelGlobe {...atlas} />);
+  render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   act(() => map.on.mock.calls.find(([event]) => event === 'style.load')![1]());
   const onClick = map.on.mock.calls.find(([event, layer]) => event === 'click' && layer === 'trip-paris')![2];
   act(() => onClick({ features: [{ geometry: { type: 'Point', coordinates: [2.3522, 48.8566] }, properties: { count: 3 } }] }));
@@ -57,7 +58,7 @@ it('opens an accessible trip popup and returns focus to the globe on close', asy
 });
 
 it('allows pausing and resuming rotation', async () => {
-  render(<TravelGlobe {...atlas} />);
+  render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   await userEvent.click(screen.getByRole('button', { name: 'Pause rotation' }));
   expect(screen.getByRole('button', { name: 'Resume rotation' })).toHaveAttribute('aria-pressed', 'true');
   await userEvent.click(screen.getByRole('button', { name: 'Resume rotation' }));
@@ -66,7 +67,7 @@ it('allows pausing and resuming rotation', async () => {
 
 it('keeps rotation disabled when reduced motion is requested', () => {
   media.matches = true;
-  render(<TravelGlobe {...atlas} />);
+  render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   expect(screen.getByRole('button', { name: 'Resume rotation' })).toBeDisabled();
   expect(screen.getByText('Rotation off for reduced motion.')).toBeInTheDocument();
 });

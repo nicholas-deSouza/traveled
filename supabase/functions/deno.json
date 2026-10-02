@@ -1,0 +1,6 @@
+{
+  "compilerOptions": { "strict": true },
+  "tasks": {
+    "check": "deno check photo-upload/index.ts photo-upload-worker/index.ts"
+  }
+}

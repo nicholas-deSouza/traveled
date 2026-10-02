@@ -14,6 +14,11 @@ function fixture() {
   const slots = [], effects = [], requests = [], revoked = [];
   let cursor = 0, pendingEffects = [], value;
   const react = {
+    useCallback(fn, deps) {
+      const i = cursor++;
+      if (!(i in slots) || deps.some((dep, j) => !Object.is(dep, slots[i].deps[j]))) slots[i] = { deps, fn };
+      return slots[i].fn;
+    },
     useState(initial) {
       const i = cursor++;
       if (!(i in slots)) slots[i] = initial;
@@ -32,8 +37,9 @@ function fixture() {
     },
   };
   const exports = {};
-  vm.runInNewContext(compiled, { exports, require(name) {
+  vm.runInNewContext(compiled, { exports, window: { addEventListener() {}, removeEventListener() {} }, require(name) {
     if (name === 'react') return react;
+    if (name === '../../lib/photoChanges') return { PHOTO_CHANGED_EVENT: 'traveled:photo-changed' };
     return {
       errorMessage: error => error.message,
       releasePhotos: photos => photos.forEach(photo => { if (photo.url) revoked.push(photo.url); }),

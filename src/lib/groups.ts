@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { extractLocation, type Coordinates } from './photoMetadata';
+import type { Coordinates } from './photoMetadata';
 
 export type Group = { id: string; name: string; created_by: string };
 export type Trip = { id: string; group_id: string; created_by: string; color: string | null; title: string; description: string | null; starts_on: string | null; ends_on: string | null };
@@ -113,51 +113,12 @@ export function releasePhotos(photos: Photo[]) {
 }
 
 export async function deletePhoto(photoId: string): Promise<void> {
-  const db = client();
-  const { data: { user }, error: authError } = await db.auth.getUser();
-  if (authError) throw authError;
-  if (!user) throw new Error('Sign in to delete a photo.');
-  // Re-read trusted metadata under RLS; never accept a storage path from the UI.
-  const { data: photo, error } = await db.from('photos')
-    .select('id, storage_path, uploaded_by').eq('id', photoId).single();
+  // The trusted API derives ownership and the Storage path from server metadata.
+  // Visibility is removed transactionally before durable byte cleanup.
+  const { data, error } = await client().functions.invoke('photo-upload', { body: { action: 'delete', id: photoId } });
   if (error) throw error;
-  if (!photo || photo.uploaded_by !== user.id) throw new Error('Only the uploader can delete this photo.');
-  const bucket = db.storage.from('trip-photos');
-  const { data: removed, error: storageError } = await bucket.remove([photo.storage_path]);
-  // Missing files are safe to retry; other storage failures leave metadata intact.
-  const storageCode = storageError && 'code' in storageError ? String(storageError.code) : '';
-  if (storageError && !['NoSuchKey', 'ObjectNotFound'].includes(storageCode)) throw storageError;
-  if (!storageError && !removed?.length) {
-    // Storage can silently skip a row denied by RLS. Do not orphan that file.
-    const { data: exists, error: existsError } = await bucket.exists(photo.storage_path);
-    if (existsError) throw existsError;
-    if (exists !== false) throw new Error('The photo file could not be removed. Please retry.');
-  }
-  try {
-    const { data: deleted, error: metadataError } = await db.from('photos').delete()
-      .eq('id', photo.id).eq('uploaded_by', user.id).select('id').single();
-    if (metadataError) throw metadataError;
-    if (!deleted) throw new Error('Deletion was denied or the photo is no longer available.');
-  } catch (error) {
-    throw new Error(`The photo file was removed or is already absent, but its gallery entry could not be deleted. Retry to finish cleanup. ${errorMessage(error)}`);
-  }
-}
-
-export async function uploadPhoto(trip: Trip, userId: string, file: File) {
-  const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
-  const extension = extensions[file.type];
-  if (!extension || file.size > 20 * 1024 * 1024) throw new Error(`${file.name}: choose a JPEG, PNG, WebP, or GIF under 20 MB.`);
-  const db = client();
-  const location = await extractLocation(file);
-  const path = `${trip.group_id}/${trip.id}/${crypto.randomUUID()}.${extension}`;
-  const { error } = await db.storage.from('trip-photos').upload(path, file, { contentType: file.type });
-  if (error) throw error;
-  const { error: photoError } = await db.from('photos').insert({ trip_id: trip.id, uploaded_by: userId, storage_path: path, ...location });
-  if (photoError) {
-    const { error: cleanupError } = await db.storage.from('trip-photos').remove([path]);
-    if (cleanupError) throw new Error(`${errorMessage(photoError)} The file could not be cleaned up; please contact the group owner.`);
-    throw photoError;
-  }
+  if (data?.error) throw new Error(String(data.error));
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('traveled:photo-changed'));
 }
 
 // Metadata only: never download the entire atlas's original images.

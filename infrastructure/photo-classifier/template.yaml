@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: IAM-only immutable quarantined photo classification. No public URL or API Gateway.
+Parameters:
+  SupabaseUrl:
+    Type: String
+    AllowedPattern: 'https://[a-z0-9.-]+'
+  ClassifierSecretArn:
+    Type: String
+    Description: Existing Secrets Manager JSON secret with SUPABASE_SERVICE_ROLE_KEY, SIGHTENGINE_API_USER, SIGHTENGINE_API_SECRET.
+Resources:
+  PhotoClassifier:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs24.x
+      Architectures: [x86_64]
+      CodeUri: dist/lambda/
+      Handler: infrastructure/photo-classifier/src/handler.handler
+      MemorySize: 2048
+      Timeout: 60
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_SERVICE_ROLE_KEY: !Sub '{{resolve:secretsmanager:${ClassifierSecretArn}:SecretString:SUPABASE_SERVICE_ROLE_KEY}}'
+          SIGHTENGINE_API_USER: !Sub '{{resolve:secretsmanager:${ClassifierSecretArn}:SecretString:SIGHTENGINE_API_USER}}'
+          SIGHTENGINE_API_SECRET: !Sub '{{resolve:secretsmanager:${ClassifierSecretArn}:SecretString:SIGHTENGINE_API_SECRET}}'
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      # No Events and no FunctionUrlConfig: invocation uses the AWS Lambda IAM API only.
+Outputs:
+  ClassifierArn:
+    Value: !GetAtt PhotoClassifier.Arn

@@ -8,6 +8,7 @@ import { hasLocation } from '../lib/photoMetadata';
 import { tripColor } from '../lib/tripColor';
 import { useResource } from '../lib/useResource';
 import { useSession } from '../lib/useSession';
+import { PHOTO_CHANGED_EVENT } from '../lib/photoChanges';
 
 const emptyTrips: Atlas['trips'] = [];
 const emptyPhotos: Atlas['photos'] = [];
@@ -23,10 +24,12 @@ export function DashboardPage() {
     };
     window.addEventListener('focus', refresh);
     window.addEventListener('pageshow', refresh);
+    window.addEventListener(PHOTO_CHANGED_EVENT, refresh);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('focus', refresh);
       window.removeEventListener('pageshow', refresh);
+      window.removeEventListener(PHOTO_CHANGED_EVENT, refresh);
     };
   }, [reload]);
   const trips = data?.trips ?? emptyTrips;
