@@ -47,12 +47,11 @@ export function PhotoUploadForm({ tripId }: { tripId: string }) {
         onChange={event => {
           const added = Array.from(event.target.files ?? []).map(file => ({ id: nextId.current++, file }));
           setSelection(current => {
-            const identity = (file: File) => JSON.stringify([file.name, file.size, file.type, file.lastModified]);
-            const seen = new Set(current.map(({ file }) => identity(file)));
+            // Metadata can match for distinct photos. Only skip the same File object.
+            const seen = new Set(current.map(({ file }) => file));
             return [...current, ...added.filter(({ file }) => {
-              const key = identity(file);
-              if (seen.has(key)) return false;
-              seen.add(key);
+              if (seen.has(file)) return false;
+              seen.add(file);
               return true;
             })];
           });
