@@ -70,6 +70,28 @@ it('adds subsequent selections to the current previews and releases all URLs on 
   unmount();
   expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
 });
+it('deduplicates repeated picks within and across selections before enqueueing', async () => {
+  mount();
+  const picker = screen.getByLabelText('Add photos', { selector: 'input' });
+  const original = new File(['photo'], 'repeat.jpg', { type: 'image/jpeg', lastModified: 100 });
+  const repeated = new File(['photo'], 'repeat.jpg', { type: 'image/jpeg', lastModified: 100 });
+  await userEvent.upload(picker, [original, repeated]);
+  await userEvent.upload(picker, [repeated, second]);
+  expect(screen.getAllByRole('img')).toHaveLength(2);
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+  await userEvent.click(screen.getByRole('button', { name: 'Upload 2 photos' }));
+  expect(enqueue).toHaveBeenCalledWith('trip', [original, second]);
+});
+it('keeps photos with the same name but different metadata', async () => {
+  mount();
+  const original = new File(['photo'], 'same.jpg', { type: 'image/jpeg', lastModified: 100 });
+  const resized = new File(['longer photo'], 'same.jpg', { type: 'image/jpeg', lastModified: 100 });
+  const modified = new File(['photo'], 'same.jpg', { type: 'image/jpeg', lastModified: 200 });
+  const differentType = new File(['photo'], 'same.jpg', { type: 'image/png', lastModified: 100 });
+  await userEvent.upload(screen.getByLabelText('Add photos', { selector: 'input' }), [original, resized, modified, differentType]);
+  await userEvent.click(screen.getByRole('button', { name: 'Upload 4 photos' }));
+  expect(enqueue).toHaveBeenCalledWith('trip', [original, resized, modified, differentType]);
+});
 it('disables selection and removal while the photos are being queued', async () => {
   let finish!: () => void;
   enqueue.mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
