@@ -2,7 +2,7 @@
 
 Operator-selected AWS account: `905418433781`. Region: `us-east-1`.
 
-These files contain public identifiers and policies, not credentials. The operator reports that the GitHub OIDC provider, role `github-traveled-deploy` and policy `TraveledPhotoUploadDeploy` are configured in AWS. Live access and the exact OIDC trust relationship have not been verified. Worker invocation credentials, the classifier secret, GitHub environment configuration and deployment remain on the [setup checklist](../../../docs/photo-upload-actions-setup.md#setup-checklist).
+These files contain public identifiers and policies, not credentials. The operator reports that the GitHub OIDC provider, role `github-traveled-deploy` and policy `TraveledPhotoUploadDeploy` are configured in AWS. GitHub settings supplied by the operator confirm the immutable OIDC subject below, and the matching AWS trust update is operator-reported complete. Successful live role assumption remains a deployment check. The status of worker invocation credentials, the classifier secret, GitHub environment configuration and deployment is recorded on the [setup checklist](../../../docs/photo-upload-actions-setup.md#setup-checklist).
 
 ## Deployment role
 
@@ -24,15 +24,13 @@ The policy expects a Secrets Manager secret named **`traveled/photo-classifier`*
 
 ## Trust relationship
 
-[github-trust-name-format.json](github-trust-name-format.json) restricts role assumption to this repository's `photo-upload-production` environment. **It is the name-based subject example; the repository's actual OIDC subject has not been verified.**
-
-GitHub repositories created after July 15, 2026, renamed/transferred after that date, or opted into immutable subjects use owner/repository IDs in the subject. For that format, replace only the subject value with the actual, verified claim:
+[github-trust-name-format.json](github-trust-name-format.json) is the deployment trust policy for this repository's `photo-upload-production` environment. The existing filename is retained for links; its contents now use the confirmed immutable subject, including the owner and repository IDs:
 
 ```text
-repo:nicholas-deSouza@OWNER_ID/traveled@REPOSITORY_ID:environment:photo-upload-production
+repo:nicholas-deSouza@64615525/traveled@1358355406:environment:photo-upload-production
 ```
 
-Do not paste these placeholders or substitute a wildcard subject. Verify the actual subject before using the trust policy for deployment. The GitHub CLI metadata/settings lookup was unavailable from this workspace due to network connectivity; neither format has been asserted as this repository's current setting. The [GitHub OIDC reference](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims) describes both formats.
+The policy requires this exact `sub` and audience `sts.amazonaws.com` through `StringEquals`. Do not substitute the older subject containing only repository names or add a wildcard. The operator reports that the matching AWS trust relationship is installed; the deployment's role-assumption step verifies it live. If the repository is renamed, transferred or its OIDC settings change, verify the resulting subject and update the policy and setup guide together. See the [GitHub OIDC reference](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims).
 
 In GitHub, create environment `photo-upload-production` and restrict its deployment branches to `main`; an environment subject itself does not encode the branch. Edit the AWS role under **Trust relationships → Edit trust policy** using the verified subject. The provider ARN and audience are already filled in for this account. See [GitHub AWS OIDC configuration](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
 
