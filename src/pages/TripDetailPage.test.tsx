@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { loadTrip } from '../lib/groups';
 import { TripDetailPage } from './TripDetailPage';
 
@@ -10,6 +10,14 @@ vi.mock('../lib/useSession', () => ({ useSession: () => ({ user: { id: 'member' 
 vi.mock('../components/photos/TripPhotos', () => ({ TripPhotos: () => <p>Trip gallery</p> }));
 const enqueue = vi.hoisted(() => vi.fn());
 vi.mock('../lib/useUploadManager', () => ({ useUploadManager: () => ({ enqueue }) }));
+const NativeURL = URL;
+beforeEach(() => {
+  vi.stubGlobal('URL', class extends NativeURL {
+    static createObjectURL = vi.fn(() => 'blob:selection');
+    static revokeObjectURL = vi.fn();
+  });
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 function mount() {
   return render(<MemoryRouter initialEntries={['/trips/paris']}><Routes><Route path="/trips/:tripId" element={<TripDetailPage />} /></Routes></MemoryRouter>);
 }
@@ -21,8 +29,8 @@ it('queues selected photos without prematurely reporting publication', async () 
   expect(await screen.findByRole('heading', { name: 'Paris' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Upload photos' })).toBeDisabled();
   const file = new File(['photo'], 'paris.jpg', { type: 'image/jpeg' });
-  await userEvent.upload(screen.getByLabelText(/Add photos/), file);
-  await userEvent.click(screen.getByRole('button', { name: 'Upload 1 photos' }));
+  await userEvent.upload(screen.getByLabelText(/Add photos/, { selector: 'input' }), file);
+  await userEvent.click(screen.getByRole('button', { name: 'Upload 1 photo' }));
   expect(await screen.findByRole('status')).toHaveTextContent('1 photo queued.');
   expect(enqueue).toHaveBeenCalledWith('paris', [file]);
   expect(screen.getByRole('button', { name: 'Upload photos' })).toBeDisabled();
@@ -41,8 +49,8 @@ it('shows admission errors and allows another selection', async () => {
   enqueue.mockRejectedValue(new Error('Queue capacity unavailable'));
   mount();
   await screen.findByRole('heading', { name: 'Paris' });
-  await userEvent.upload(screen.getByLabelText(/Add photos/), new File(['x'], 'p.jpg', { type: 'image/jpeg' }));
-  await userEvent.click(screen.getByRole('button', { name: 'Upload 1 photos' }));
+  await userEvent.upload(screen.getByLabelText(/Add photos/, { selector: 'input' }), new File(['x'], 'p.jpg', { type: 'image/jpeg' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Upload 1 photo' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Queue capacity unavailable');
-  expect(screen.getByLabelText(/Add photos/)).toBeEnabled();
+  expect(screen.getByLabelText(/Add photos/, { selector: 'input' })).toBeEnabled();
 });

@@ -2,6 +2,8 @@
 
 The implementation follows [ADR 0002](adr/0002-photo-upload-pipeline.md) and the [implementation plan](../plans/2026-09-30-photo-upload-pipeline-implementation.md). Code is present; live deployment is outside this task. Admission defaults to disabled. Keep it disabled until the validation gates below pass.
 
+For repeatable deployment through GitHub runners, follow [GitHub Actions setup](photo-upload-actions-setup.md). The manual deployment workflow validates the already-applied migration, deploys the classifier and Edge Functions, configures runtime secrets/Vault/Cron, and checks backend health. It leaves admission paused for the live release gates.
+
 ## Dependencies and validation gates
 
 Use Node 24, pnpm 10.18, Docker, Supabase CLI, AWS CLI and AWS SAM CLI. Discover installed CLI commands through `--help` before using them. This checkout initially had no Docker/Supabase/SAM/AWS CLI. PostgreSQL 13 binaries could not initialize a disposable database because the host denied the required System V shared-memory segment, including an mmap configuration attempt.
