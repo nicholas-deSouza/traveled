@@ -24,11 +24,28 @@ export function checkStaged() {
   return paths;
 }
 
-export function validateResult(result, snapshot, paths) {
+export function validateThreadReplies(result, snapshot) {
   if (!result || typeof result.summary !== 'string' || !Array.isArray(result.addressedThreadIds)
+    || result.addressedThreadIds.some((id) => typeof id !== 'string') || !Array.isArray(result.threadReplies)
     || !Array.isArray(result.remainingIssues) || result.remainingIssues.some((s) => typeof s !== 'string')) {
     throw new Error('Invalid Codex result.');
   }
+  const addressed = new Set(result.addressedThreadIds);
+  const allowed = new Set(snapshot.threads.map((thread) => thread.id));
+  const replied = new Set();
+  for (const reply of result.threadReplies) {
+    if (!reply || !addressed.has(reply.threadId) || !allowed.has(reply.threadId) || replied.has(reply.threadId)
+      || typeof reply.body !== 'string' || !reply.body.trim() || reply.body.length > 6000) {
+      throw new Error('Each addressed thread requires exactly one nonblank reply of at most 6000 characters from the review snapshot.');
+    }
+    replied.add(reply.threadId);
+  }
+  if (addressed.size !== replied.size) throw new Error('Each addressed thread requires a fix explanation.');
+  return result.threadReplies;
+}
+
+export function validateResult(result, snapshot, paths) {
+  validateThreadReplies(result, snapshot);
   for (const id of result.addressedThreadIds) {
     const thread = snapshot.threads.find((t) => t.id === id);
     if (!thread || !paths.includes(thread.path)) throw new Error('Addressed thread must belong to a changed file in the review snapshot.');

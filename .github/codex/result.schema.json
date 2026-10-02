@@ -1,10 +1,22 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["summary", "addressedThreadIds", "remainingIssues"],
+  "required": ["summary", "addressedThreadIds", "threadReplies", "remainingIssues"],
   "properties": {
     "summary": { "type": "string" },
     "addressedThreadIds": { "type": "array", "items": { "type": "string" } },
+    "threadReplies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["threadId", "body"],
+        "properties": {
+          "threadId": { "type": "string" },
+          "body": { "type": "string" }
+        }
+      }
+    },
     "remainingIssues": { "type": "array", "items": { "type": "string" } }
   }
 }
