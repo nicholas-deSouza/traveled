@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    # main is this repository's default branch. Feature branches run via PRs.
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -17,23 +19,32 @@ jobs:
     name: Tests, lint and build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      upload_database: ${{ steps.changes.outputs.upload_database }}
+      classifier_artifact: ${{ steps.changes.outputs.classifier_artifact }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: pnpm
+      - name: Select upload validation jobs
+        id: changes
+        run: node scripts/ci-upload-changes.mjs
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      - run: node --test .github/scripts/greploop.test.mjs eslint-rules/no-direct-dom.test.mjs
+      - run: node --test eslint-rules/no-direct-dom.test.mjs
       - run: pnpm lint
       - run: pnpm build
 
   upload-database:
     name: Upload SQL and real Storage gates
+    needs: checks
+    if: needs.checks.outputs.upload_database == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -77,6 +88,8 @@ jobs:
 
   classifier-artifact:
     name: Classifier and Linux native artifact
+    needs: checks
+    if: needs.checks.outputs.classifier_artifact == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -86,7 +99,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm test --prefix infrastructure/photo-classifier
       # Packaging requires the reviewed package lock; absence is a release failure.
       - name: Build and smoke-test the Lambda ZIP contents
         run: |

@@ -64,7 +64,27 @@ reset role;
 select public.upload_command('20000000-0000-4000-8000-000000000001','{"action":"delete","id":"20000000-0000-4000-8000-000000000020"}');
 select pg_temp.assert((select count(*)=0 from public.photos),'Trusted deletion removes visibility first');
 select public.upload_claim()::text as cleanup_job \gset
-delete from storage.objects where name in(select value->>'path' from jsonb_array_elements(:'cleanup_job'::jsonb->'objects'));
+-- These are metadata-only fixtures in this rolled-back transaction, not real
+-- Storage files. Use the Storage service's scoped deletion flag only while
+-- simulating its cleanup. check-upload-storage.mjs tests actual API deletion.
+-- https://github.com/supabase/storage/blob/master/migrations/tenant/0055-prevent-direct-deletes.sql
+select pg_temp.assert(coalesce(current_setting('storage.allow_delete_query',true),'false')<>'true','Storage deletion guard starts enabled');
+do $$ begin
+  if to_regprocedure('storage.protect_delete()') is not null then
+    perform pg_temp.denied('delete from storage.objects where false');
+  end if;
+end $$;
+set local storage.allow_delete_query = 'true';
+delete from storage.objects where (bucket_id,name) in(
+  select value->>'bucket',value->>'path' from jsonb_array_elements(:'cleanup_job'::jsonb->'objects'));
+set local storage.allow_delete_query = 'false';
+select pg_temp.assert(not exists(select 1 from storage.objects where (bucket_id,name) in(
+  select value->>'bucket',value->>'path' from jsonb_array_elements(:'cleanup_job'::jsonb->'objects'))),'Simulated cleanup removes exactly the claimed fixtures');
+do $$ begin
+  if to_regprocedure('storage.protect_delete()') is not null then
+    perform pg_temp.denied('delete from storage.objects where false');
+  end if;
+end $$;
 select pg_temp.assert(public.upload_finish(:'cleanup_job'::jsonb||jsonb_build_object('outcome','cleaned','removed',:'cleanup_job'::jsonb->'objects')),'Cleanup commits per-path progress');
 select pg_temp.assert((select filename is null and source_sha256 is null and latitude is null and not cleanup_pending from upload_private.submissions),'Cleanup scrubs sensitive submission metadata');
 select pg_temp.assert((select count(*)=3 from upload_private.objects),'Permanent minimal path tombstones survive cleanup');
