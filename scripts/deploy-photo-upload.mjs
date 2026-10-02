@@ -68,7 +68,9 @@ export async function deployBackend(phase, env, fetchRequest = fetch) {
     query: sql, parameters, read_only: readOnly,
   }, 'Database configuration');
   async function health(requireSchedule) {
-    const rows = await query(healthQuery, [], true);
+    // read_only selects supabase_read_only_user, which cannot execute this
+    // service-only function. Use the deployment connection even for this SELECT.
+    const rows = await query(healthQuery, [], false);
     const state = rows?.[0]?.health;
     if (!state || !['queues', 'cron', 'pg_net'].every(key => state[key] === true)) {
       throw new Error('Upload migration or required Queues, Cron and pg_net extensions are missing.');

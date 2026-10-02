@@ -27,6 +27,11 @@ function backend({ health = {}, fail, worker = { processed: 0 } } = {}) {
     }
     const json = value => Response.json(value);
     if (url.endsWith('/database/query')) {
+      // Match Management API role selection: the restricted read-only role
+      // has no EXECUTE grant on the service-only health function.
+      if (body.query.includes('upload_health()') && body.read_only) {
+        return new Response('permission denied for function upload_health', { status: 400 });
+      }
       if (body.query.includes('upload_health()')) return json([{ health: {
         queues: true, cron: true, pg_net: true, admission_enabled: !paused, scheduled, ...health,
       } }]);
@@ -68,6 +73,8 @@ test('prepare verifies existing migration before pausing; never applies schema o
     'update upload_private.settings set admission_enabled = false where singleton',
     'select public.upload_health() as health',
   ]);
+  assert.ok(api.calls.filter(call => call.body.query.includes('upload_health()'))
+    .every(call => call.body.read_only === false));
   const missing = backend({ health: { queues: false } });
   await assert.rejects(deployBackend('prepare', env, missing.fetchRequest), /migration/);
   assert.equal(missing.calls.length, 1);
@@ -108,7 +115,7 @@ test('verify requires CORS, authorization, an authenticated worker and active sc
   const endpoints = api.calls.filter(call => call.url.includes('/functions/'));
   assert.deepEqual(endpoints.map(call => call.options.method), ['OPTIONS', 'POST', 'POST', 'POST']);
   assert.equal(endpoints[3].options.headers.Authorization, `Bearer ${env.PHOTO_UPLOAD_WORKER_TOKEN}`);
-  assert.equal(api.calls.at(-1).body.read_only, true);
+  assert.equal(api.calls.at(-1).body.read_only, false);
   assert.equal(api.calls.at(-2).body.query, 'select public.upload_schedule()');
 });
 

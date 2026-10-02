@@ -62,7 +62,8 @@ Verify a real photo uploads and appears in the gallery. If rollout fails, leave 
 
 ## Setup checklist
 
-- [x] Apply the database migration (operator-reported complete).
+- [x] Apply the initial database migration (operator-reported complete).
+- [ ] Apply [the PGMQ compatibility migration](../supabase/migrations/20261002224541_photo_upload_pgmq_compatibility.sql) before retrying deployment. It corrects health and worker checks for the optional fourth `pgmq.read` argument. For the existing manually migrated project, run this new file in SQL Editor, then confirm `select public.upload_health();` reports `queues: true`. The deployment workflow does not apply migrations.
 - [x] Choose AWS account `905418433781` and region `us-east-1`.
 - [x] Configure the GitHub OIDC provider, role `github-traveled-deploy` and policy `TraveledPhotoUploadDeploy` (operator-reported complete; live access not yet verified).
 - [x] Verify the repository's OIDC subject and update the role's trust relationship for `photo-upload-production`: `repo:nicholas-deSouza@64615525/traveled@1358355406:environment:photo-upload-production` (GitHub settings supplied by operator; AWS policy update operator-reported complete; live role assumption pending deployment).
@@ -78,7 +79,8 @@ Verify a real photo uploads and appears in the gallery. If rollout fails, leave 
 - [x] Add GitHub environment secret `SUPABASE_ACCESS_TOKEN` (operator-reported complete).
 - [x] Add GitHub environment secret `PHOTO_UPLOAD_WORKER_TOKEN` (operator-reported complete).
 - [x] Restrict the GitHub environment's deployment branches to `main` (operator-reported complete).
-- [ ] Commit/review/merge the workflow and backend changes to `main`.
+- [x] Commit and push the workflow and backend changes (operator-reported complete).
+- [x] Review and merge the workflow and backend changes to `main` (operator-reported complete).
 - [ ] Run deployment; validate the Edge runtime's modern `default` Supabase key; finish the exact-ARN invocation policy and rerun if bootstrapping.
 - [ ] Complete live release checks, including a successful Sightengine `nudity-2.1` request, and deploy the frontend.
 - [ ] Enable admission and verify a real gallery upload.
