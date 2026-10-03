@@ -40,6 +40,7 @@ function TripLocationPopup({ popup, onClose, onZoom, zooming, error }: { popup: 
 
 export function TravelGlobe({ trips, photos }: Atlas) {
   const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
+  const [clusters, setClusters] = useState<(Popup & { color: string })[]>([]);
   const [popup, setPopup] = useState<Popup | null>(null);
   const popupRef = useRef<Popup | null>(null);
   const zoomToCluster = useRef<((popup: Popup) => Promise<void>) | null>(null);
@@ -70,6 +71,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
       return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
     });
     setThumbnails([]);
+    setClusters([]);
     setPopup(null);
     popupRef.current = null;
     let disposed = false;
@@ -83,6 +85,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
         const source = map.getSource(selected.sourceId) as maplibregl.GeoJSONSource;
         const zoom = await source.getClusterExpansionZoom(selected.clusterId);
         if (disposed || popupRef.current !== selected) return;
+        setZooming(false);
         map.easeTo({ center: selected.coordinates, zoom, duration: media.matches ? 0 : 600 });
         popupRef.current = null;
         setPopup(null);
@@ -90,30 +93,41 @@ export function TravelGlobe({ trips, photos }: Atlas) {
       } catch {
         if (!disposed && popupRef.current === selected) setZoomError('Could not expand this group. Try zooming in with the map controls.');
       } finally {
-        if (!disposed) setZooming(false);
+        if (!disposed && popupRef.current === selected) setZooming(false);
       }
     };
     const updateThumbnails = () => {
       if (!map.isStyleLoaded()) return;
       const visible = new Map<string, { coordinates: [number, number]; path: string; title: string; tripId: string; color: string; count: number; x: number; y: number }>();
-      if (map.getZoom() >= 5) {
-        for (const { trip, id, points } of datasets) {
-          if (!map.getLayer(id)) continue;
-          // Rendered features exclude the far side of the globe and offscreen tiles.
-          for (const feature of map.queryRenderedFeatures({ layers: [id] })) {
-            if (feature.geometry.type !== 'Point') continue;
-            // A cluster spans separate locations; a representative photo would
-            // misleadingly place that photo at the cluster's averaged center.
-            if (feature.properties.cluster) continue;
-            const photo = points.photos[Number(feature.properties.representative)];
-            if (!photo) continue;
+      const visibleClusters = new Map<string, Popup & { color: string }>();
+      for (const { trip, id, points } of datasets) {
+        if (!map.getLayer(id)) continue;
+        // Rendered features exclude the far side of the globe and offscreen tiles.
+        for (const feature of map.queryRenderedFeatures({ layers: [id] })) {
+          if (feature.geometry.type !== 'Point') continue;
+          // A cluster spans separate locations; a representative photo would
+          // misleadingly place that photo at the cluster's averaged center.
+          if (feature.properties.cluster) {
             const coordinates = feature.geometry.coordinates.slice(0, 2) as [number, number];
-            const position = map.project(coordinates);
-            const key = `${id}-${feature.properties.cluster ? `cluster-${feature.properties.cluster_id}` : photo.id}`;
-            visible.set(key, { coordinates, path: photo.storage_path, title: trip.title, tripId: trip.id, color: tripColor(trip), count: Number(feature.properties.count), x: position.x, y: position.y });
+            const point = map.project(coordinates);
+            const clusterId = Number(feature.properties.cluster_id);
+            visibleClusters.set(`${id}-${clusterId}`, { title: trip.title, tripId: trip.id,
+              count: Number(feature.properties.count), coordinates, x: point.x, y: point.y, clusterId, sourceId: id, color: tripColor(trip) });
+            continue;
           }
+          if (map.getZoom() < 5) continue;
+          const photo = points.photos[Number(feature.properties.representative)];
+          if (!photo) continue;
+          const coordinates = feature.geometry.coordinates.slice(0, 2) as [number, number];
+          const position = map.project(coordinates);
+          const key = `${id}-${feature.properties.cluster ? `cluster-${feature.properties.cluster_id}` : photo.id}`;
+          visible.set(key, { coordinates, path: photo.storage_path, title: trip.title, tripId: trip.id, color: tripColor(trip), count: Number(feature.properties.count), x: position.x, y: position.y });
         }
       }
+      setClusters(previous => {
+        const next = [...visibleClusters.values()];
+        return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+      });
       const offsets = markerOffsets([...visible].map(([id, point]) => ({ id, x: point.x, y: point.y })));
       currentThumbnails = [...visible].map(([id, point]) => {
         const [dx, dy] = offsets.get(id)!;
@@ -188,9 +202,6 @@ export function TravelGlobe({ trips, photos }: Atlas) {
           'circle-radius': ['case', ['has', 'point_count'], 18, 7], 'circle-color': tripColor(trip),
           'circle-stroke-color': '#fff', 'circle-stroke-width': 2,
         } });
-        map.addLayer({ id: `${id}-count`, type: 'symbol', source: id, filter: ['has', 'point_count'], layout: {
-          'text-field': ['to-string', ['get', 'count']], 'text-font': ['Noto Sans Regular'], 'text-size': 12, 'text-allow-overlap': true,
-        }, paint: { 'text-color': '#fff' } });
         map.on('click', id, event => {
           const feature = event.features?.[0];
           if (feature?.geometry.type !== 'Point') return;
@@ -231,10 +242,15 @@ export function TravelGlobe({ trips, photos }: Atlas) {
   return <div ref={interactionRoot} className="relative">
     <div ref={container} tabIndex={-1} aria-label="Interactive globe with trip photo locations" className="h-[460px] w-full overflow-hidden rounded-3xl bg-ink md:h-[620px]" />
     <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
+      {clusters.map(cluster => <button key={`${cluster.sourceId}-${cluster.clusterId}`} type="button"
+        className="pointer-events-auto absolute flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-xs font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+        style={{ left: cluster.x, top: cluster.y, transform: 'translate(-50%, -50%)', backgroundColor: cluster.color }}
+        aria-label={`${cluster.title}: ${cluster.count} photos across grouped locations. Explore group`}
+        onClick={() => { const selected = { ...cluster }; setZoomError(null); setZooming(false); popupRef.current = selected; setPopup(selected); }}>{cluster.count}</button>)}
       {thumbnails.map(point => <PhotoMarker key={point.id} point={point} />)}
       {popup && <TripLocationPopup key={`${popup.tripId}-${popup.coordinates.join(',')}`} popup={popup} onClose={closePopup} onZoom={() => { if (popupRef.current) void zoomToCluster.current?.(popupRef.current); }} zooming={zooming} error={zoomError} />}
     </div>
-    <p className="absolute bottom-16 left-3 max-w-56 rounded-lg bg-white/95 px-3 py-2 text-xs text-ink/80">Numbered circles group photos across locations. Select one to explore.</p>
+    <p className="pointer-events-none absolute bottom-16 left-3 max-w-56 rounded-lg bg-white/95 px-3 py-2 text-xs text-ink/80">Numbered circles group photos across locations. Select one to explore.</p>
     <div className="absolute left-3 top-3 rounded-xl bg-white/95 p-2">
       <Button size="sm" variant="outline" disabled={reducedMotion} aria-pressed={paused || reducedMotion} onClick={() => {
         pausedRef.current = !pausedRef.current;

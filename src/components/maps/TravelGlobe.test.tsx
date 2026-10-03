@@ -79,7 +79,7 @@ it('identifies grouped locations and expands them instead of claiming one locati
   map.getSource.mockReturnValue({ getClusterExpansionZoom: expansion });
   render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   act(() => map.on.mock.calls.find(([event]) => event === 'style.load')![1]());
-  expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'trip-paris-count', filter: ['has', 'point_count'] }));
+  expect(map.addLayer.mock.calls.every(([layer]) => layer.type !== 'symbol')).toBe(true);
   const click = map.on.mock.calls.find(([event, layer]) => event === 'click' && layer === 'trip-paris')![2];
   act(() => click({ features: [{ geometry: { type: 'Point', coordinates: [2, 48] }, properties: { count: 3, cluster: true, cluster_id: 42 } }] }));
   expect(screen.getByRole('dialog')).toHaveTextContent('3 photos across grouped locations');
@@ -115,4 +115,40 @@ it('does not place a representative photo thumbnail at an averaged cluster locat
   render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   act(() => map.on.mock.calls.find(([event]) => event === 'render')![1]());
   expect(screen.queryByRole('link', { name: /photos. Open trip/ })).not.toBeInTheDocument();
+});
+
+it('keeps a newer expansion loading when an older request settles', async () => {
+  const pending: ((zoom: number) => void)[] = [];
+  map.getSource.mockReturnValue({ getClusterExpansionZoom: vi.fn(() => new Promise<number>(resolve => pending.push(resolve))) });
+  render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
+  act(() => map.on.mock.calls.find(([event]) => event === 'style.load')![1]());
+  const click = map.on.mock.calls.find(([event, layer]) => event === 'click' && layer === 'trip-paris')![2];
+  const select = (id: number) => act(() => click({ features: [{ geometry: { type: 'Point', coordinates: [id, 48] }, properties: { count: 3, cluster: true, cluster_id: id } }] }));
+  select(42);
+  await userEvent.click(screen.getByRole('button', { name: 'Show locations' }));
+  select(43);
+  await userEvent.click(screen.getByRole('button', { name: 'Show locations' }));
+  await act(async () => pending[0](8));
+  expect(screen.getByRole('button', { name: 'Zooming…' })).toBeDisabled();
+  expect(map.easeTo).not.toHaveBeenCalled();
+  await act(async () => pending[1](9));
+  expect(map.easeTo).toHaveBeenCalledWith(expect.objectContaining({ center: [43, 48], zoom: 9 }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('renders font-independent cluster counts and opens groups with the keyboard at low zoom', async () => {
+  map.getZoom.mockReturnValueOnce(2);
+  map.queryRenderedFeatures.mockReturnValue([{ geometry: { type: 'Point', coordinates: [2, 48] }, properties: { count: 12, cluster: true, cluster_id: 42 } }]);
+  render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
+  act(() => map.on.mock.calls.find(([event]) => event === 'render')![1]());
+  const cluster = screen.getByRole('button', { name: 'Paris: 12 photos across grouped locations. Explore group' });
+  expect(cluster).toHaveTextContent('12');
+  cluster.focus();
+  await userEvent.keyboard('{Enter}');
+  expect(screen.getByRole('dialog')).toHaveTextContent('12 photos across grouped locations');
+  await userEvent.keyboard('{Escape}');
+  cluster.focus();
+  await userEvent.keyboard(' ');
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  expect(screen.getByText('Numbered circles group photos across locations. Select one to explore.')).toHaveClass('pointer-events-none');
 });
