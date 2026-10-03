@@ -19,6 +19,7 @@ export function PhotoUploadQueue() {
   const snapshot = useSyncExternalStore(manager.subscribe, manager.getSnapshot);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const visibleItems = snapshot.items.filter(item => !item.outcome || !['published', 'canceled', 'deleted'].includes(item.outcome));
   const unfinished = snapshot.items.filter(item => !item.outcome);
   const failed = unfinished.filter(item => item.local_status === 'failed' || item.pause_reason === 'technical');
   async function run(action: () => Promise<unknown>) {
@@ -26,19 +27,19 @@ export function PhotoUploadQueue() {
     try { await action(); } catch (cause) { setError(errorMessage(cause)); }
     finally { setBusy(false); }
   }
-  if (!snapshot.items.length && !snapshot.error && snapshot.compatible) return null;
+  if (!visibleItems.length && !error && !snapshot.error && snapshot.compatible) return null;
   return <Card className="my-6 p-5" aria-labelledby="photo-upload-heading">
     <h2 id="photo-upload-heading" className="font-display text-2xl">Photo uploads</h2>
     {!snapshot.compatible && <p role="alert" className="mt-2">This browser cannot safely coordinate photo uploads. Use a browser with Web Locks, BroadcastChannel, IndexedDB, and worker WebP encoding.</p>}
     {(error || snapshot.error) && <p role="alert" className="mt-2 text-red-700">{error || snapshot.error}</p>}
-    {snapshot.items.length > 0 && <>
+    {visibleItems.length > 0 && <>
       <p role="status" className="mt-2 text-sm">{unfinished.length} awaiting completion. Photos appear after both verification checks.</p>
       <div className="my-3 flex flex-wrap gap-2">
         <Button variant="outline" disabled={busy || !failed.length} onClick={() => void run(() => Promise.all(failed.map(item => manager.retry(item.id))))}>Retry failed</Button>
         <Button variant="outline" disabled={busy || !unfinished.length} onClick={() => void run(() => Promise.all(unfinished.map(item => manager.cancel(item.id))))}>Cancel remaining</Button>
       </div>
       <ul className="max-h-80 space-y-3 overflow-y-auto">
-        {snapshot.items.map(item => <li key={item.id} className="rounded-xl bg-sand/60 p-3">
+        {visibleItems.map(item => <li key={item.id} className="rounded-xl bg-sand/60 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="break-all text-sm font-medium">{item.filename || 'Photo'}{item.trip_id !== '00000000-0000-0000-0000-000000000000' && <> · <Link to={`/trips/${encodeURIComponent(item.trip_id)}`} className="underline">Open trip</Link></>}</p>
             {!item.outcome && <Button size="sm" variant="ghost" disabled={busy} aria-label={`Cancel ${item.filename || 'photo'}`} onClick={() => void run(() => manager.cancel(item.id))}>Cancel</Button>}

@@ -22,7 +22,8 @@ it('shows verification progress and cancels only remaining submissions', async (
   mock.snapshot.items = [item(), item({ id: 'published', filename: 'Added.jpg', outcome: 'published' })];
   mount();
   expect(screen.getByText('Awaiting original verification')).toBeInTheDocument();
-  expect(screen.getByText('Added to gallery')).toBeInTheDocument();
+  expect(screen.queryByText('Added to gallery')).not.toBeInTheDocument();
+  expect(screen.queryByText('Added.jpg')).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Cancel remaining' }));
   expect(mock.cancel).toHaveBeenCalledExactlyOnceWith('one');
   expect(screen.getByRole('button', { name: 'Retry failed' })).toBeDisabled();
@@ -45,9 +46,31 @@ it('explains browser incompatibility and quota pauses', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('Web Locks');
   expect(screen.getByText(/verification allowance resets/)).toBeInTheDocument();
 });
-it('shows a canceled pre-admission identity without a nonexistent trip link', () => {
+it('hides canceled uploads and the empty queue', () => {
   mock.snapshot.items = [item({ trip_id: '00000000-0000-0000-0000-000000000000', outcome: 'canceled', phase: 'complete' })];
   mount();
-  expect(screen.getByText('Canceled')).toBeInTheDocument();
+  expect(screen.queryByText('Canceled')).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Photo uploads' })).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Open trip' })).not.toBeInTheDocument();
+});
+it('removes the status as soon as the last upload is published', () => {
+  mock.snapshot.items = [item()];
+  const view = mount();
+  expect(screen.getByRole('heading', { name: 'Photo uploads' })).toBeInTheDocument();
+  mock.snapshot = { ...mock.snapshot, items: [item({ outcome: 'published', phase: 'complete' })] };
+  view.rerender(<MemoryRouter><PhotoUploadQueue /></MemoryRouter>);
+  expect(screen.queryByRole('heading', { name: 'Photo uploads' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+});
+it('keeps unsuccessful outcomes visible after other uploads finish', () => {
+  mock.snapshot.items = [item({ outcome: 'published' }), item({ id: 'rejected', filename: 'Rejected.jpg', outcome: 'rejected' })];
+  mount();
+  expect(screen.getByText('Not added: did not pass verification')).toBeInTheDocument();
+  expect(screen.queryByText('Added to gallery')).not.toBeInTheDocument();
+});
+it('keeps queue errors visible when there are no remaining uploads', () => {
+  mock.snapshot.items = [item({ outcome: 'published' })];
+  mock.snapshot.error = 'Unable to refresh uploads';
+  mount();
+  expect(screen.getByRole('alert')).toHaveTextContent('Unable to refresh uploads');
 });
