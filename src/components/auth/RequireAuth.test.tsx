@@ -51,6 +51,23 @@ it('surfaces session errors', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('Session unavailable');
 });
 
+it.each(['session', 'anonymous'] as const)('uses INITIAL_SESSION with an %s result before a late session lookup', async result => {
+  let finish!: (result: { data: { session: { user: { id: string } } | null }; error: null }) => void;
+  auth.getSession.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  mountAccount();
+  expect(screen.getByRole('status')).toHaveTextContent('Signing you in');
+  const notify = auth.onAuthStateChange.mock.calls[0][0];
+  act(() => notify('INITIAL_SESSION', result === 'session' ? { user: { id: 'current-account' } } : null));
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  if (result === 'session') expect(screen.getByRole('button', { name: 'current-account: 0' })).toBeInTheDocument();
+  else expect(screen.getByText('Login')).toBeInTheDocument();
+
+  await act(async () => finish({ data: { session: result === 'session' ? null : { user: { id: 'stale-account' } } }, error: null }));
+  if (result === 'session') expect(screen.getByRole('button', { name: 'current-account: 0' })).toBeInTheDocument();
+  else expect(screen.getByText('Login')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /stale-account/ })).not.toBeInTheDocument();
+});
+
 it('clears protected page state when the account changes and redirects after sign-out', async () => {
   auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'account-a' } } }, error: null });
   mountAccount();

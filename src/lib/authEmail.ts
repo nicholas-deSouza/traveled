@@ -7,7 +7,7 @@ export function authEmail(value: string): string {
   const local = email.split('@')[0];
   if (email.length > 254 || local.length > 64 || !emailPattern.test(email) ||
     local.startsWith('.') || local.endsWith('.') || local.includes('..')) {
-    throw new Error('Enter a valid email address without emojis.');
+    throw new Error('Enter a valid email address using only ASCII characters.');
   }
   return email;
 }

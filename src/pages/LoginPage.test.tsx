@@ -45,13 +45,13 @@ it('never opens protected content when password authentication fails', async () 
   expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: 'someone-else@example.com', password: "' OR 1=1; DROP TABLE profiles;--" });
 });
 
-it.each(['password', 'magic-link', 'reset'] as const)('rejects emoji email in %s mode even when native validation is bypassed', async mode => {
+it.each(['password', 'magic-link', 'reset'] as const)('explains the ASCII email restriction in %s mode even when native validation is bypassed', async mode => {
   render(<MemoryRouter><LoginPage /></MemoryRouter>);
   if (mode === 'magic-link') await userEvent.click(screen.getByRole('button', { name: 'Use a magic link instead' }));
   if (mode === 'reset') await userEvent.click(screen.getByRole('button', { name: 'Set or reset password' }));
-  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'traveler😀@example.com' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'josé@example.com' } });
   fireEvent.submit(screen.getByRole('button', { name: mode === 'password' ? 'Sign in' : mode === 'reset' ? 'Send password setup link' : 'Send magic link' }).closest('form')!);
-  expect(await screen.findByRole('alert')).toHaveTextContent('without emojis');
+  expect(await screen.findByRole('alert')).toHaveTextContent('Enter a valid email address using only ASCII characters.');
   expect(auth.signInWithPassword).not.toHaveBeenCalled();
   expect(auth.signInWithOtp).not.toHaveBeenCalled();
   expect(auth.resetPasswordForEmail).not.toHaveBeenCalled();
