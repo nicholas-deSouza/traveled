@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { allowedPath, validateResult } from './greploop-patch.mjs';
-import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice } from './greploop.mjs';
+import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice, validPullRequest, validThreadConnection } from './greploop.mjs';
 
 // All fixture subprocesses must be isolated from the committing repository.
 function exec(command, args, options = {}) {
@@ -28,6 +28,15 @@ const check = { id: 1, app: { slug: 'greptile-apps' }, head_sha: sha,
   status: 'completed', conclusion: 'success', started_at: '2026-09-01T10:00:00Z' };
 const summary = { user: bot, body: `### Confidence Score: 3/5\nLast reviewed: https://github.com/owner/repo/commit/${sha}`,
   updated_at: '2026-09-01T10:03:00Z' };
+
+test('malformed GitHub responses fail with a stage-specific error before publication', async () => {
+  for (const value of [null, {}, { ...pr, labels: null }, { ...pr, head: null }]) assert.equal(validPullRequest(value), false);
+  for (const value of [null, {}, { repository: { pullRequest: null } }, { repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } } } }]) assert.equal(validThreadConnection(value), false);
+  const context = { repo: { owner: 'owner', repo: 'repo' } };
+  await assert.rejects(assertCurrent({ github: { rest: { pulls: { get: async () => ({ data: null }) } } }, context }, { number: 1, sha, branch: 'feature' }),
+    error => error.code === 'invalid_shape' && error.stage === 'pull-request');
+  assert.equal(scoreFrom(null), null);
+});
 
 test('score parsing accepts Greptile formatting but fails closed on ambiguity', () => {
   assert.equal(scoreFrom('### Confidence Score: 3/5'), 3);

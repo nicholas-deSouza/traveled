@@ -2,4 +2,11 @@
 set -eu
 cd "$(git rev-parse --show-toplevel)"
 # Run the full local suite, including the component/test pairing check.
-exec pnpm test
+printf '%s\n' '[pre-commit] Running the full local test suite.' >&2
+test_status=0
+pnpm test || test_status=$?
+if [ "$test_status" -ne 0 ]; then
+  printf '%s\n' '[pre-commit] Tests failed. Fix the reported failures before committing.' >&2
+  exit "$test_status"
+fi
+printf '%s\n' '[pre-commit] All local tests passed.' >&2

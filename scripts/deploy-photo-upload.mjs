@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createDiagnostics, fail, isRecord, request as diagnosticRequest, runScript } from './script-diagnostics.mjs';
 
 // Operational settings only. This script never applies migrations or enables admission.
 const healthQuery = 'select public.upload_health() as health';
@@ -46,37 +47,36 @@ export function deploymentConfig(env, phase) {
     url: `https://${project}.supabase.co` };
 }
 
-export async function deployBackend(phase, env, fetchRequest = fetch) {
-  const config = deploymentConfig(env, phase);
-  async function request(url, options, label, json = false) {
-    let response;
-    try {
-      response = await fetchRequest(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(100_000) });
-    } catch {
-      throw new Error(`${label} request failed. Check connectivity and service availability.`);
-    }
-    if (!response.ok) throw new Error(`${label} failed (HTTP ${response.status}). Check configuration and permissions.`);
-    if (!json) return response;
-    try { return await response.json(); }
-    catch { throw new Error(`${label} returned an invalid response.`); }
-  }
-  const management = (path, body, label) => request(`https://api.supabase.com/v1/projects/${config.project}/${path}`, {
+export async function deployBackend(phase, env, fetchRequest = fetch, diagnostics = createDiagnostics('deploy-photo-upload')) {
+  let config;
+  try { config = deploymentConfig(env, phase); }
+  catch (error) { throw fail('configuration', 'invalid_configuration', error.message); }
+  diagnostics.event(phase, 'started');
+  const request = (url, options, label, json = false, extra = {}) => diagnosticRequest(fetchRequest, url, options, {
+    stage: 'edge.verify', label, json, diagnostics, ...extra,
+  });
+  const management = (path, body, label, json = true, extra = {}) => request(`https://api.supabase.com/v1/projects/${config.project}/${path}`, {
     method: 'POST', headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, label, true);
-  const query = (sql, parameters = [], readOnly = false) => management('database/query', {
+  }, label, json, { stage: path === 'secrets' ? 'edge.secrets' : 'database.query', ...extra });
+  const query = (sql, parameters = [], readOnly = false, extra = {}) => management('database/query', {
     query: sql, parameters, read_only: readOnly,
-  }, 'Database configuration');
+  }, 'Database configuration', true, { statuses: [200], validate: Array.isArray, expected: 'an array of database rows', ...extra });
   async function health(requireSchedule) {
     // read_only selects supabase_read_only_user, which cannot execute this
     // service-only function. Use the deployment connection even for this SELECT.
-    const rows = await query(healthQuery, [], false);
+    const rows = await query(healthQuery, [], false, {
+      stage: 'database.health',
+      validate: rows => Array.isArray(rows) && rows.length === 1 && isRecord(rows[0]?.health)
+        && ['queues', 'cron', 'pg_net', 'scheduled', 'admission_enabled'].every(key => typeof rows[0].health[key] === 'boolean'),
+      expected: 'one health row with boolean queues, cron, pg_net, scheduled and admission_enabled fields',
+    });
     const state = rows?.[0]?.health;
     if (!state || !['queues', 'cron', 'pg_net'].every(key => state[key] === true)) {
-      throw new Error('Upload migration or required Queues, Cron and pg_net extensions are missing.');
+      throw fail('database.health', 'missing_extensions', 'Upload migration or required Queues, Cron and pg_net extensions are missing.');
     }
     if (requireSchedule && (state.scheduled !== true || state.admission_enabled !== false)) {
-      throw new Error('Worker schedule must be active and upload admission must remain paused.');
+      throw fail('database.health', 'unsafe_health_state', 'Worker schedule must be active and upload admission must remain paused.');
     }
     return state;
   }
@@ -86,7 +86,8 @@ export async function deployBackend(phase, env, fetchRequest = fetch) {
     await query('update upload_private.settings set admission_enabled = false where singleton');
     // Confirm the singleton exists and the pause took effect before changing services.
     const state = await health(false);
-    if (state.admission_enabled !== false) throw new Error('Could not pause upload admission.');
+    if (state.admission_enabled !== false) throw fail('database.pause', 'admission_not_paused', 'Could not pause upload admission.');
+    diagnostics.event(phase, 'completed');
     return;
   }
   if (phase === 'configure') {
@@ -99,14 +100,19 @@ export async function deployBackend(phase, env, fetchRequest = fetch) {
       // Clear any expired session credential from a previous manual deployment.
       PHOTO_CLASSIFIER_AWS_SESSION_TOKEN: '',
     };
-    await management('secrets', Object.entries(secrets).map(([name, value]) => ({ name, value })), 'Edge runtime configuration');
+    // Secret writes need only a successful status; the response can have no JSON body.
+    await management('secrets', Object.entries(secrets).map(([name, value]) => ({ name, value })), 'Edge runtime configuration', false, { statuses: [200, 201, 204] });
     for (const [name, value] of [
       ['photo_upload_worker_url', `${config.url}/functions/v1/photo-upload-worker`],
       ['photo_upload_worker_token', config.workerToken],
     ]) {
-      const rows = await query(vaultQuery, [name, value]);
-      if (Number(rows?.[0]?.configured) !== 1) throw new Error('Vault configuration did not update exactly one named secret.');
+      await query(vaultQuery, [name, value], false, {
+        stage: name === 'photo_upload_worker_url' ? 'vault.worker-url' : 'vault.worker-token',
+        validate: rows => Array.isArray(rows) && rows.length === 1 && [1, '1'].includes(rows[0]?.configured),
+        expected: 'exactly one Vault row with configured equal to 1',
+      });
     }
+    diagnostics.event(phase, 'completed');
     return;
   }
 
@@ -114,35 +120,32 @@ export async function deployBackend(phase, env, fetchRequest = fetch) {
   const preflight = await request(uploadUrl, { method: 'OPTIONS', headers: {
     Origin: 'https://upload-check.invalid', 'Access-Control-Request-Method': 'POST',
     'Access-Control-Request-Headers': 'authorization,content-type',
-  } }, 'Upload preflight');
+  } }, 'Upload preflight', false, { stage: 'edge.preflight', statuses: [204] });
   if (preflight.status !== 204 || preflight.headers.get('access-control-allow-origin') !== '*') {
-    throw new Error('Upload API CORS preflight is not ready.');
+    throw fail('edge.preflight', 'invalid_cors', 'Upload API CORS preflight must allow origin *.');
   }
   // Denial probes catch accidentally enabled gateway JWT checks and handler boot failures.
   for (const [url, body] of [[uploadUrl, '{"action":"list"}'], [`${uploadUrl}-worker`, '{}']]) {
-    let response;
-    try {
-      response = await fetchRequest(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body, redirect: 'error', signal: AbortSignal.timeout(100_000) });
-    } catch { throw new Error('Edge authorization probe request failed.'); }
-    if (response.status !== 401) throw new Error('Edge endpoint did not reject an unauthenticated request.');
+    await request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
+      'Edge authorization probe', false, { stage: url === uploadUrl ? 'edge.upload-auth' : 'edge.worker-auth', statuses: [401] });
   }
   // This is an operational worker wakeup: pending real jobs can be processed.
   const worker = await request(`${uploadUrl}-worker`, { method: 'POST', headers: {
     Authorization: `Bearer ${config.workerToken}`, 'Content-Type': 'application/json',
-  }, body: '{}' }, 'Worker health check', true);
-  if (!Number.isInteger(worker?.processed) || worker.processed < 0) throw new Error('Worker health response is invalid.');
-  await query('select public.upload_schedule()');
+  }, body: '{}' }, 'Worker health check', true, {
+    stage: 'edge.worker-health', statuses: [200],
+    validate: value => isRecord(value) && Number.isSafeInteger(value.processed) && value.processed >= 0,
+    expected: 'an object with a nonnegative integer processed field',
+  });
+  diagnostics.event('edge.worker-health', 'validated', { count: worker.processed });
+  await query('select public.upload_schedule()', [], false, { stage: 'database.schedule' });
   await health(true);
+  diagnostics.event(phase, 'completed');
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  try {
-    await deployBackend(process.argv[2], process.env);
+  await runScript('deploy-photo-upload', async diagnostics => {
+    await deployBackend(process.argv[2], process.env, fetch, diagnostics);
     console.log('Backend configuration step completed. Upload admission remains paused.');
-  } catch (error) {
-    // Never log provider bodies, query parameters, native errors or environment contents.
-    console.error(error.message);
-    process.exitCode = 1;
-  }
+  });
 }

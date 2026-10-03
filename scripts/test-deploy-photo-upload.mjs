@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { deployBackend } from './deploy-photo-upload.mjs';
+import { deployBackend as deploy } from './deploy-photo-upload.mjs';
+import { createDiagnostics } from './script-diagnostics.mjs';
+
+const quiet = createDiagnostics('test', () => {});
+const deployBackend = (phase, env, fetchRequest, diagnostics = quiet) => deploy(phase, env, fetchRequest, diagnostics);
 
 const env = {
   SUPABASE_PROJECT_REF: 'abcdefghijklmnopqrst',
@@ -95,6 +99,28 @@ test('configure uses structured secrets and bound Vault values with stable names
   assert.ok(api.calls.every(call => call.options.redirect === 'error'));
 });
 
+test('configure accepts empty successful secrets responses and continues configuring Vault', async () => {
+  for (const status of [201, 204]) {
+    const api = backend({ fail: url => url.endsWith('/secrets') ? new Response(null, { status }) : undefined });
+    await deployBackend('configure', env, api.fetchRequest);
+    assert.equal(api.calls.length, 3);
+    assert.deepEqual(api.calls.slice(1).map(call => call.body.parameters), [
+      ['photo_upload_worker_url', `https://${env.SUPABASE_PROJECT_REF}.supabase.co/functions/v1/photo-upload-worker`],
+      ['photo_upload_worker_token', env.PHOTO_UPLOAD_WORKER_TOKEN],
+    ]);
+  }
+});
+
+test('configure rejects empty HTTP failures and still requires JSON for Vault queries', async () => {
+  const denied = backend({ fail: url => url.endsWith('/secrets') ? new Response(null, { status: 403 }) : undefined });
+  await assert.rejects(deployBackend('configure', env, denied.fetchRequest), /Edge runtime configuration failed \(HTTP 403\)/);
+  assert.equal(denied.calls.length, 1);
+
+  const invalid = backend({ fail: url => url.endsWith('/database/query') ? new Response(null, { status: 200 }) : undefined });
+  await assert.rejects(deployBackend('configure', env, invalid.fetchRequest), /Database configuration returned an invalid response/);
+  assert.equal(invalid.calls.length, 2);
+});
+
 test('failed Vault configuration is rejected and raw secret-bearing error responses are hidden', async () => {
   const api = backend({ fail: url => url.endsWith('/secrets') ? new Response(env.PHOTO_UPLOAD_WORKER_TOKEN, { status: 403 }) : undefined });
   await assert.rejects(deployBackend('configure', env, api.fetchRequest), error => {
@@ -141,4 +167,29 @@ test('verify rejects an invalid worker payload, inactive schedule or enabled adm
     await deployBackend('prepare', env, api.fetchRequest).catch(() => {});
     await assert.rejects(deployBackend('verify', env, api.fetchRequest));
   }
+});
+
+test('malformed health and Vault responses stop before subsequent configuration', async () => {
+  for (const response of [[], [{ health: null }], [{ health: { queues: 'true' } }]]) {
+    const api = backend({ fail: () => Response.json(response) });
+    await assert.rejects(deployBackend('prepare', env, api.fetchRequest), error => error.code === 'invalid_shape' && error.stage === 'database.health');
+    assert.equal(api.calls.length, 1);
+  }
+  for (const rows of [[{ configured: true }], [{ configured: 1 }, { configured: 1 }]]) {
+    const api = backend({ fail: url => url.endsWith('/database/query') ? Response.json(rows) : undefined });
+    await assert.rejects(deployBackend('configure', env, api.fetchRequest), error => error.code === 'invalid_shape' && error.stage === 'vault.worker-url');
+    assert.equal(api.calls.length, 2);
+  }
+});
+
+test('deployment diagnostics show status and failure category without secret values or query parameters', async () => {
+  const lines = [];
+  const diagnostics = createDiagnostics('deploy-photo-upload', line => lines.push(line));
+  const api = backend({ fail: url => url.endsWith('/database/query') ? new Response(env.PHOTO_UPLOAD_WORKER_TOKEN, { headers: { 'content-type': 'application/json' } }) : undefined });
+  await assert.rejects(deployBackend('configure', env, api.fetchRequest, diagnostics), /not valid JSON/);
+  const failure = JSON.parse(lines.at(-1));
+  assert.equal(failure.stage, 'vault.worker-url');
+  assert.equal(failure.status, 200);
+  assert.equal(failure.code, 'invalid_json');
+  for (const value of [env.SUPABASE_ACCESS_TOKEN, env.PHOTO_UPLOAD_WORKER_TOKEN, env.PHOTO_CLASSIFIER_AWS_ACCESS_KEY_ID, env.PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY]) assert.ok(!lines.join('\n').includes(value));
 });

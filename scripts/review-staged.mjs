@@ -1,11 +1,13 @@
-import { spawn, spawnSync } from 'node:child_process';
-import { accessSync, closeSync, constants, openSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { accessSync, closeSync, constants, openSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createDiagnostics, fail, isMain, isRecord, readJSONFile, runCommand, ScriptError } from './script-diagnostics.mjs';
+
+const logger = createDiagnostics('review-staged');
 
 function git(...args) {
-  const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-  if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr);
+  const result = runCommand('git', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }, `review.git.${args[0]}`, logger);
   return result.stdout;
 }
 
@@ -27,7 +29,7 @@ async function runReviewer(args, options) {
       const child = spawn(executable, args, { stdio: ['pipe', options.log, options.log] });
       let error;
       const timeout = setTimeout(() => {
-        error = new Error('Review timed out after five minutes.');
+        error = fail('reviewer', 'reviewer_timeout', 'Review timed out after five minutes.');
         child.kill('SIGKILL');
       }, 300_000);
       child.on('error', (cause) => { error = cause; });
@@ -43,7 +45,7 @@ async function runReviewer(args, options) {
     if (result.error?.code === 'ENOENT') continue;
     return result;
   }
-  throw new Error('Codex CLI not found. Set CODEX_BIN to its executable path or install the Codex desktop app.');
+  throw fail('reviewer', 'missing_executable', 'Codex CLI not found. Set CODEX_BIN to its executable path or install the Codex desktop app.');
 }
 
 const tty = Boolean(process.stderr.isTTY) && process.env.TERM !== 'dumb';
@@ -78,13 +80,22 @@ function progress() {
     if (tty) process.stderr.write('\r\x1b[2K');
   };
 }
+export function validReviewReport(report) {
+  return isRecord(report) && Array.isArray(report.findings)
+    && report.findings.every(item => isRecord(item) && ['P0', 'P1', 'P2', 'P3'].includes(item.severity)
+      && ['location', 'title', 'explanation'].every(key => typeof item[key] === 'string' && item[key].trim()))
+    && typeof report.summary === 'string';
+}
+
+export async function reviewStaged() {
 let diagnostics;
 try {
+  logger.event('review', 'started');
   const names = git('diff', '--cached', '--name-only', '-z').split('\0').filter(Boolean);
-  if (names.length === 0) process.exit(0);
+  if (names.length === 0) { logger.event('review', 'skipped', { count: 0 }); return; }
   // Reject sensitive paths before reading any staged contents.
   if (names.some((name) => !/(^|\/)\.env\.example$/i.test(name) && /(^|\/)(\.env(?:\..*)?|credentials(?:\..*)?|id_rsa|id_ed25519)$|\.(pem|key|p12|pfx)$/i.test(name))) {
-    throw new Error('A sensitive file is staged. Unstage it before requesting review.');
+    throw fail('review.scope', 'sensitive_file', 'A sensitive file is staged. Unstage it before requesting review.');
   }
   const tree = git('write-tree').trim();
   const diff = git('diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=5');
@@ -125,6 +136,7 @@ ${diff}
   const stopProgress = progress();
   let review;
   try {
+    logger.event('reviewer', 'started', { count: names.length });
     // A new exec invocation, isolated working directory, and no config/session reuse.
     review = await runReviewer([
       'exec', '--model', 'gpt-5.6-terra', '--ephemeral', '--ignore-user-config', '--ignore-rules',
@@ -135,11 +147,11 @@ ${diff}
     stopProgress();
     closeSync(log);
   }
-  if (review.error || review.status !== 0) throw new Error(review.error?.message || `Reviewer exited with status ${review.status}.`);
-  const report = JSON.parse(readFileSync(outputPath, 'utf8'));
-  if (!Array.isArray(report.findings) || !report.findings.every((item) => item && ['P0', 'P1', 'P2', 'P3'].includes(item.severity) && ['location', 'title', 'explanation'].every((key) => typeof item[key] === 'string' && item[key].trim())) || typeof report.summary !== 'string') {
-    throw new Error('Reviewer returned an invalid report.');
-  }
+  if (review.error instanceof ScriptError) throw review.error;
+  if (review.error || review.status !== 0) throw fail('reviewer', 'reviewer_failed', 'Reviewer could not complete. Check its diagnostic log and executable configuration.', { exit_status: review.status });
+  logger.event('reviewer', 'completed', { exit_status: review.status });
+  const report = readJSONFile(outputPath, 'review-report', 'Reviewer report', validReviewReport);
+  logger.event('review-report', 'validated', { count: report.findings.length });
   if (report.findings.length) {
     console.error(paint(`\n✖ COMMIT BLOCKED · ${report.findings.length} review finding${report.findings.length === 1 ? '' : 's'}`, '1;31'));
     report.findings.forEach((finding, index) => {
@@ -149,14 +161,21 @@ ${diff}
       wrapped(finding.explanation, '     ');
     });
     console.error(paint('\n  Fix and stage the changes, then retry git commit.\n', '1'));
-    process.exit(1);
+    process.exitCode = 1;
+    logger.event('review', 'blocked', { count: report.findings.length });
+    return;
   }
-  if (git('write-tree').trim() !== tree) throw new Error('Staged changes changed during review. Retry git commit.');
+  if (git('write-tree').trim() !== tree) throw fail('review.index', 'staged_changes_changed', 'Staged changes changed during review. Retry git commit.');
   console.error(paint('✔ REVIEW PASSED · Continuing commit.\n', '1;32'));
+  logger.event('review', 'completed');
 } catch (error) {
+  logger.error('review', error);
   console.error(paint('\n✖ COMMIT BLOCKED · Review could not complete', '1;31'));
-  wrapped(error.message);
+  wrapped(error instanceof ScriptError ? error.message : 'A review stage failed. Inspect its diagnostic log and required input files.');
   if (diagnostics) console.error(`\n  Diagnostic log: ${diagnostics}`);
   console.error('');
   process.exitCode = 1;
 }
+}
+
+if (isMain(import.meta.url)) await reviewStaged();
