@@ -27,12 +27,29 @@ export function checkStaged() {
   return paths;
 }
 
-export function validateResult(result, snapshot, paths) {
+export function validateThreadReplies(result, snapshot) {
   if (!isRecord(result) || typeof result.summary !== 'string' || !Array.isArray(result.addressedThreadIds)
     || result.addressedThreadIds.some(id => typeof id !== 'string') || !Array.isArray(snapshot?.threads)
+    || snapshot.threads.some(thread => typeof thread?.id !== 'string') || !Array.isArray(result.threadReplies)
     || !Array.isArray(result.remainingIssues) || result.remainingIssues.some((s) => typeof s !== 'string')) {
-    throw fail('codex-report', 'invalid_shape', 'Invalid Codex result: expected summary, string addressedThreadIds and string remainingIssues arrays, plus snapshot threads.');
+    throw fail('codex-report', 'invalid_shape', 'Invalid Codex result: expected summary, string addressedThreadIds and remainingIssues arrays, threadReplies, and snapshot thread IDs.');
   }
+  const addressed = new Set(result.addressedThreadIds);
+  const allowed = new Set(snapshot.threads.map((thread) => thread.id));
+  const replied = new Set();
+  for (const reply of result.threadReplies) {
+    if (!reply || !addressed.has(reply.threadId) || !allowed.has(reply.threadId) || replied.has(reply.threadId)
+      || typeof reply.body !== 'string' || !reply.body.trim() || reply.body.length > 6000) {
+      throw fail('codex-report', 'invalid_shape', 'Each addressed thread requires exactly one nonblank reply of at most 6000 characters from the review snapshot.');
+    }
+    replied.add(reply.threadId);
+  }
+  if (addressed.size !== replied.size) throw fail('codex-report', 'invalid_shape', 'Each addressed thread requires a fix explanation.');
+  return result.threadReplies;
+}
+
+export function validateResult(result, snapshot, paths) {
+  validateThreadReplies(result, snapshot);
   for (const id of result.addressedThreadIds) {
     const thread = snapshot.threads.find((t) => t.id === id);
     if (!thread || !paths.includes(thread.path)) throw policyError('Addressed thread must belong to a changed file in the review snapshot.');

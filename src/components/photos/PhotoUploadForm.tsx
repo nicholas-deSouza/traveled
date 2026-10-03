@@ -46,7 +46,15 @@ export function PhotoUploadForm({ tripId }: { tripId: string }) {
         accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" disabled={busy}
         onChange={event => {
           const added = Array.from(event.target.files ?? []).map(file => ({ id: nextId.current++, file }));
-          setSelection(current => [...current, ...added]);
+          setSelection(current => {
+            // Metadata can match for distinct photos. Only skip the same File object.
+            const seen = new Set(current.map(({ file }) => file));
+            return [...current, ...added.filter(({ file }) => {
+              if (seen.has(file)) return false;
+              seen.add(file);
+              return true;
+            })];
+          });
           if (added.length) { setMessage(''); setError(''); }
           event.target.value = '';
         }} />

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { apiCall, createDiagnostics, fail, isRecord } from '../../scripts/script-diagnostics.mjs';
+import { validateThreadReplies } from './greploop-patch.mjs';
 
 const diagnostics = createDiagnostics('greploop');
 export function validPullRequest(pr) {
@@ -85,7 +86,7 @@ export function startReason(snapshot) {
 export const plain = (value) => String(value).slice(0, 6000)
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('@', '&#64;');
 
-export async function finishAttempt({ github, context, core }, snapshot, jobs, result = {}) {
+export async function finishAttempt({ github, context, core }, snapshot, jobs, result = {}, publishedSha = '') {
   if (!result || typeof result !== 'object') result = {};
   let status;
   let reason;
@@ -97,7 +98,9 @@ export async function finishAttempt({ github, context, core }, snapshot, jobs, r
     reason = 'A validated fix was pushed. No fix run is active now; a completed review of the new commit can start the next attempt if findings remain.';
   } else if (Object.values(jobs).includes('failure')) {
     status = 'Failed — needs maintainer attention';
-    reason = 'A workflow job failed. No automatic retry will run for this commit. Inspect the linked job logs and fix the blocker.';
+    reason = /^[a-f0-9]{40}$/.test(publishedSha)
+      ? `The validated fix was pushed as ${publishedSha}, but posting fix replies or resolving threads failed. Inspect the linked job logs and finish the remaining replies/resolutions manually. No automatic retry will run for this reviewed commit.`
+      : 'A workflow job failed. No automatic retry will run for this commit. Inspect the linked job logs and fix the blocker.';
   } else {
     status = 'Needs maintainer attention';
     reason = result.reason || 'No publishable source patch was produced. A maintainer must address the remaining issues.';
@@ -243,11 +246,19 @@ export async function assertCurrent({ github, context }, snapshot) {
   }
 }
 
-export async function resolveAddressed({ github }, snapshot, ids) {
-  const allowed = new Set(snapshot.threads.map((t) => t.id));
-  for (const id of ids) {
-    if (!allowed.has(id)) throw new Error('Codex returned an unknown thread ID.');
+export async function resolveAddressed({ github, context }, snapshot, result, publishedSha) {
+  const replies = validateThreadReplies(result, snapshot);
+  if (!/^[a-f0-9]{40}$/.test(publishedSha) || publishedSha === snapshot.sha) {
+    throw new Error('A published fix commit is required before replying to threads.');
+  }
+  const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${publishedSha}`;
+  for (const { threadId: id, body: explanation } of replies) {
+    const body = `**Greploop: Fixed**\n\n<pre>${plain(explanation)}</pre>\n\n[Fix commit](${commitUrl}).`;
+    await apiCall('reply-thread', () => github.graphql(`mutation($id:ID!,$body:String!) {
+      addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}) { comment { id } }
+    }`, { id, body }), response => typeof response?.addPullRequestReviewThreadReply?.comment?.id === 'string'
+      && response.addPullRequestReviewThreadReply.comment.id.length > 0, diagnostics);
     await apiCall('resolve-thread', () => github.graphql('mutation($id:ID!) { resolveReviewThread(input:{threadId:$id}) { thread { id } } }', { id }),
-      result => result?.resolveReviewThread?.thread?.id === id, diagnostics);
+      response => response?.resolveReviewThread?.thread?.id === id, diagnostics);
   }
 }
