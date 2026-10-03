@@ -74,3 +74,20 @@ it('keeps queue errors visible when there are no remaining uploads', () => {
   mount();
   expect(screen.getByRole('alert')).toHaveTextContent('Unable to refresh uploads');
 });
+it.each(['published', 'canceled', 'deleted'] as const)('clears stale action errors when the last upload is %s', async outcome => {
+  mock.snapshot.items = [item({ local_status: 'failed' })];
+  mock.retry.mockRejectedValue(new Error('Offline'));
+  const view = mount();
+  await userEvent.click(screen.getByRole('button', { name: 'Retry Paris.jpg' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Offline');
+
+  mock.snapshot = { ...mock.snapshot, items: [item({ outcome, phase: 'complete' })] };
+  view.rerender(<MemoryRouter><PhotoUploadQueue /></MemoryRouter>);
+  expect(screen.queryByRole('heading', { name: 'Photo uploads' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+  mock.snapshot = { ...mock.snapshot, items: [item({ id: 'new' })] };
+  view.rerender(<MemoryRouter><PhotoUploadQueue /></MemoryRouter>);
+  expect(screen.getByRole('heading', { name: 'Photo uploads' })).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
