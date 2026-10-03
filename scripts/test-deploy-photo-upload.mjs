@@ -19,7 +19,7 @@ const env = {
   PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY: 'invocation-secret',
 };
 
-function backend({ health = {}, fail, worker = { processed: 0 } } = {}) {
+function backend({ health = {}, fail, worker = { processed: 0 }, queryStatus = 200 } = {}) {
   const calls = [];
   let paused = false, scheduled = false;
   const fetchRequest = async (url, options) => {
@@ -29,7 +29,7 @@ function backend({ health = {}, fail, worker = { processed: 0 } } = {}) {
       const result = fail(url, options, body);
       if (result) return result;
     }
-    const json = value => Response.json(value);
+    const json = value => Response.json(value, { status: url.endsWith('/database/query') ? queryStatus : 200 });
     if (url.endsWith('/database/query')) {
       // Match Management API role selection: the restricted read-only role
       // has no EXECUTE grant on the service-only health function.
@@ -82,6 +82,19 @@ test('prepare verifies existing migration before pausing; never applies schema o
   const missing = backend({ health: { queues: false } });
   await assert.rejects(deployBackend('prepare', env, missing.fetchRequest), /migration/);
   assert.equal(missing.calls.length, 1);
+});
+
+test('database queries accept HTTP 201 throughout deployment and still validate health', async () => {
+  const api = backend({ queryStatus: 201 });
+  await deployBackend('prepare', env, api.fetchRequest);
+  await deployBackend('configure', env, api.fetchRequest);
+  await deployBackend('verify', env, api.fetchRequest);
+  assert.equal(api.calls.at(-2).body.query, 'select public.upload_schedule()');
+
+  const invalid = backend({ queryStatus: 201, health: { queues: 'true' } });
+  await assert.rejects(deployBackend('prepare', env, invalid.fetchRequest),
+    error => error.code === 'invalid_shape' && error.stage === 'database.health');
+  assert.equal(invalid.calls.length, 1);
 });
 
 test('configure uses structured secrets and bound Vault values with stable names on repeat runs', async () => {

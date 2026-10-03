@@ -61,7 +61,7 @@ export async function deployBackend(phase, env, fetchRequest = fetch, diagnostic
   }, label, json, { stage: path === 'secrets' ? 'edge.secrets' : 'database.query', ...extra });
   const query = (sql, parameters = [], readOnly = false, extra = {}) => management('database/query', {
     query: sql, parameters, read_only: readOnly,
-  }, 'Database configuration', true, { statuses: [200], validate: Array.isArray, expected: 'an array of database rows', ...extra });
+  }, 'Database configuration', true, { statuses: [200, 201], validate: Array.isArray, expected: 'an array of database rows', ...extra });
   async function health(requireSchedule) {
     // read_only selects supabase_read_only_user, which cannot execute this
     // service-only function. Use the deployment connection even for this SELECT.
