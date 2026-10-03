@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Upload worker release check</title></head>
+  <body>
+    <h1>Upload worker release check</h1>
+    <p>This checks the real Vite module worker using generated images. It does not call Supabase or Sightengine.</p>
+    <p id="status" role="status">Running…</p>
+    <pre id="results" aria-label="Browser check results"></pre>
+    <label>Optional single-photo HEIC fixture <input id="heic" type="file" accept=".heic,.heif"></label>
+    <p>Verify orientation against your original when running the app. This page checks decoding and output limits only.</p>
+    <script type="module" src="/scripts/upload-browser-check.ts"></script>
+  </body>
+</html>

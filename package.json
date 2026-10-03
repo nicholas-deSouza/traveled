@@ -14,7 +14,8 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:scripts": "node --test scripts/test-*.mjs .github/scripts/*.test.mjs",
-    "test:classifier": "npm test --prefix infrastructure/photo-classifier"
+    "test:classifier": "npm test --prefix infrastructure/photo-classifier",
+    "test:upload:browser": "node scripts/check-upload-browser.mjs"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.1.2",

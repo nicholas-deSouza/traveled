@@ -1,6 +1,8 @@
 # Photo upload pipeline deployment and verification
 
-The implementation follows [ADR 0002](adr/0002-photo-upload-pipeline.md) and the [implementation plan](../plans/2026-09-30-photo-upload-pipeline-implementation.md). Code is present; live deployment is outside this task. Admission defaults to disabled. Keep it disabled until the validation gates below pass.
+The implementation follows [ADR 0002](adr/0002-photo-upload-pipeline.md) and the [implementation plan](../plans/2026-09-30-photo-upload-pipeline-implementation.md). Admission defaults to disabled. Keep general admission disabled until the validation gates below pass; live end-to-end tests require a coordinated temporary admission window.
+
+Use the [ordered release checklist](photo-upload-release-checklist.md) to execute the gates and record each result. The [2026-10-03 validation record](photo-upload-release-results-2026-10-03.md) distinguishes local checks, deployment evidence, and pending live/device checks. A green deployment is not release acceptance.
 
 For repeatable deployment through GitHub runners, follow [GitHub Actions setup](photo-upload-actions-setup.md). The manual deployment workflow validates the already-applied migration, deploys the classifier and Edge Functions, configures runtime secrets/Vault/Cron, and checks backend health. It leaves admission paused for the live release gates.
 
