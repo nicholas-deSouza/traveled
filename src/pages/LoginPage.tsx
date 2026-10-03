@@ -6,6 +6,7 @@ import { Field } from '../components/ui/field';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { errorMessage } from '../lib/groups';
 import { authDestination } from '../lib/authRedirect';
+import { authEmail } from '../lib/authEmail';
 
 export function LoginPage() {
   const [params] = useSearchParams();
@@ -24,25 +25,26 @@ export function LoginPage() {
     setError('');
     setMessage('');
     try {
+      const address = authEmail(email);
       // Reuse the callback's destination validation for both sign-in methods.
       const redirect = new URL('/auth/callback', window.location.origin);
       redirect.searchParams.set('next', authDestination(params.get('next')));
 
       if (mode === 'password') {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error } = await supabase.auth.signInWithPassword({ email: address, password });
         if (error) throw error;
         setPassword('');
         navigate(redirect.pathname + redirect.search, { replace: true });
       } else if (mode === 'reset') {
         redirect.searchParams.set('intent', 'password');
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirect.toString() });
+        const { error } = await supabase.auth.resetPasswordForEmail(address, { redirectTo: redirect.toString() });
         if (error) throw error;
         setMessage('If an account exists for this email, you’ll receive a link to set a new password.');
       } else {
         redirect.searchParams.set('intent', 'password');
         // Keep the destination in the query: Supabase uses the fragment for the session.
         const { error } = await supabase.auth.signInWithOtp({
-          email: email.trim(),
+          email: address,
           options: { emailRedirectTo: redirect.toString() },
         });
         if (error) throw error;
