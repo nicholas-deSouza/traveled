@@ -41,3 +41,8 @@ export async function fingerprint(blob: Blob): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+/** Reject unsupported containers before reserving capacity or attempting a transfer. */
+export async function validateSourceFile(file: Blob): Promise<void> {
+  assertSourceSize(file.size);
+  imageFormat(new Uint8Array(await file.arrayBuffer()));
+}

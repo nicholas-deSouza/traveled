@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createUploadManager, type ManagerDependencies } from './manager';
 import { fakeChannel, fakeLocks, memoryStore, submission } from './testHelpers';
-import type { UploadRequest, UploadResponse, UploadSubmission } from '../photoUploadContract';
+import type { UploadPhase, UploadRequest, UploadResponse, UploadSubmission } from '../photoUploadContract';
 import { UploadApiError } from './photoUploadApi';
 vi.mock('./photoUploadApi', async (importOriginal) => ({ ...await importOriginal<typeof import('./photoUploadApi')>(), photoUploadApi: {} }));
 vi.mock('./processor', () => ({ processPhoto: vi.fn(), precheckPhoto: vi.fn(async () => null) }));
@@ -34,12 +34,224 @@ function harness(initial: UploadSubmission[] = []) {
   });
   const dependencies: ManagerDependencies = { api: { request, transfer: vi.fn(async () => undefined), recover: vi.fn(async () => new Blob(['abc'])) },
     store, locks: fakeLocks(), channel: fakeChannel(), process: vi.fn(async () => new Blob(['candidate'], { type: 'image/webp' })),
-    fingerprint: vi.fn(async () => 'sha'), gps: vi.fn(async () => ({ latitude: null, longitude: null })),
+    fingerprint: vi.fn(async () => 'sha'), validateSource: vi.fn(async () => undefined), gps: vi.fn(async () => ({ latitude: null, longitude: null })),
     online: () => true, compatible: true, phone: false };
   const manager = createUploadManager('user', dependencies); managers.push(manager);
   return { manager, server, requests, dependencies, store };
 }
 async function flush() { for (let index = 0; index < 40; index++) await Promise.resolve(); }
+const unfinishedStages: UploadPhase[] = ['original_upload', 'original_check', 'gps', 'processing', 'candidate_upload', 'candidate_check', 'publication'];
+describe('interruption stage matrix (isolated server and browser resources)', () => {
+  it.each(unfinishedStages)('cancels %s before reconnect and does not restart browser work', async (phase) => {
+    vi.useFakeTimers();
+    const { manager, dependencies, requests, server } = harness([submission({ phase, gps_acknowledged: phase !== 'gps' })]);
+    let online = false; dependencies.online = () => online;
+    manager.start(); await flush();
+    await manager.cancel('submission');
+    online = true; await vi.advanceTimersByTimeAsync(6000); await flush();
+    expect(server.get('submission')).toMatchObject({ phase: 'complete', outcome: 'canceled' });
+    expect(manager.getSnapshot().items[0]).toMatchObject({ id: 'submission', outcome: 'canceled', local_status: null });
+    expect(dependencies.process).not.toHaveBeenCalled();
+    expect(dependencies.api.transfer).not.toHaveBeenCalled();
+    expect(requests.some(body => ['candidate', 'original_uploaded', 'candidate_uploaded', 'browser_failure'].includes(body.action))).toBe(false);
+  });
+  it.each(unfinishedStages)('restarts offline at %s with the same identity and resumes only eligible work', async (phase) => {
+    vi.useFakeTimers();
+    const { manager, dependencies, requests, store } = harness([submission({ phase,
+      gps_acknowledged: ['processing', 'candidate_upload', 'candidate_check', 'publication'].includes(phase) })]);
+    let online = false; dependencies.online = () => online;
+    manager.start(); await flush(); manager.stop(); manager.start(); await flush();
+    expect(manager.getSnapshot().items).toHaveLength(1);
+    expect(manager.getSnapshot().items[0]).toMatchObject({ id: 'submission', phase });
+    await vi.advanceTimersByTimeAsync(6000); await flush();
+    expect(dependencies.api.transfer).not.toHaveBeenCalled();
+    expect(dependencies.process).not.toHaveBeenCalled();
+    expect(store.values.get('submission')?.submission.id).toBe('submission');
+    online = true; await vi.advanceTimersByTimeAsync(2000); await flush();
+    if (phase === 'original_upload') {
+      expect(manager.getSnapshot().items[0].local_status).toBe('needs_file');
+      await manager.reselect('submission', new File(['abc'], 'renamed-original.jpg'));
+      await vi.advanceTimersByTimeAsync(2000); await flush();
+      expect(manager.getSnapshot().items[0].phase).toBe('original_check');
+      expect(dependencies.api.transfer).toHaveBeenCalledOnce();
+    } else if (['gps', 'processing', 'candidate_upload'].includes(phase)) {
+      expect(dependencies.api.recover).toHaveBeenCalledOnce();
+      expect(dependencies.process).toHaveBeenCalledOnce();
+      expect(dependencies.api.transfer).toHaveBeenCalledOnce();
+      expect(manager.getSnapshot().items[0].phase).toBe('candidate_check');
+    } else {
+      expect(manager.getSnapshot().items[0].phase).toBe(phase);
+      expect(dependencies.api.recover).not.toHaveBeenCalled();
+      expect(dependencies.process).not.toHaveBeenCalled();
+      expect(dependencies.api.transfer).not.toHaveBeenCalled();
+    }
+    expect(manager.getSnapshot().items).toHaveLength(1);
+    expect(requests.filter(body => 'id' in body).every(body => 'id' in body && body.id === 'submission')).toBe(true);
+    expect(requests.some(body => body.action === 'browser_failure')).toBe(false);
+  });
+  it('discards a processing result that arrives after cancellation', async () => {
+    vi.useFakeTimers();
+    const { manager, dependencies, requests } = harness([submission({ phase: 'processing', gps_acknowledged: true })]);
+    let resolveProcess!: (blob: Blob) => void;
+    let processingSignal: AbortSignal | undefined;
+    vi.mocked(dependencies.process).mockImplementation((_source, signal) => {
+      processingSignal = signal;
+      return new Promise(resolve => { resolveProcess = resolve; });
+    });
+    manager.start(); await flush();
+    expect(dependencies.process).toHaveBeenCalledOnce();
+    await manager.cancel('submission');
+    expect(processingSignal?.aborted).toBe(true);
+    resolveProcess(new Blob(['late candidate'], { type: 'image/webp' }));
+    await flush(); await vi.advanceTimersByTimeAsync(4000); await flush();
+    expect(dependencies.api.transfer).not.toHaveBeenCalled();
+    expect(requests.some(body => body.action === 'candidate' || body.action === 'candidate_uploaded')).toBe(false);
+    expect(manager.getSnapshot().items[0].outcome).toBe('canceled');
+  });
+  it('clears stopped-account resources and excludes its submissions from the next account', async () => {
+    vi.useFakeTimers();
+    const { manager, dependencies, server, store } = harness([submission({ phase: 'original_check' })]);
+    manager.start(); await flush(); manager.stop(); await vi.advanceTimersByTimeAsync(0); await flush();
+    expect(manager.getSnapshot().items).toEqual([]);
+    expect(store.values.size).toBe(0);
+    expect(dependencies.channel.close).toHaveBeenCalledOnce();
+    expect(server.has('submission')).toBe(true);
+    server.set('other-submission', submission({ id: 'other-submission', user_id: 'other-user', phase: 'original_check' }));
+    const other = createUploadManager('other-user', { ...dependencies, store: memoryStore(), channel: fakeChannel() });
+    managers.push(other); other.start(); await flush();
+    expect(other.getSnapshot().items.map(item => item.id)).toEqual(['other-submission']);
+    expect(dependencies.api.transfer).not.toHaveBeenCalled();
+  });
+});
+describe('in-flight connectivity and repeated retry flows', () => {
+  const transferStages = [
+    ['original', 'original_upload', 'original_check'],
+    ['candidate', 'processing', 'candidate_check'],
+  ] as const;
+  it.each(transferStages)('reconnects during %s transfer without spending an automatic retry or changing its retained identity', async (kind, phase, completedPhase) => {
+    vi.useFakeTimers(); vi.spyOn(Math, 'random').mockReturnValue(0);
+    const { manager, dependencies, requests, store } = harness([submission({ phase, gps_acknowledged: kind === 'candidate' })]);
+    let online = true, uploaded = false;
+    let rejectDisconnectedTransfer!: (error: Error) => void;
+    dependencies.online = () => online;
+    const originalRequest = dependencies.api.request;
+    dependencies.api.request = vi.fn(async (body) => {
+      // A failed transfer must not be mistaken for a successful immutable upload
+      // by the manager's lost-response acknowledgment fallback.
+      if (body.action === `${kind}_uploaded` && !uploaded)
+        throw new UploadApiError('The object has not reached Storage', 503);
+      return originalRequest(body);
+    });
+    const transfer = vi.mocked(dependencies.api.transfer);
+    transfer.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectDisconnectedTransfer = reject; }));
+    // All four connected retries must remain available after the offline failure.
+    for (let attempt = 0; attempt < 4; attempt++)
+      transfer.mockRejectedValueOnce(new UploadApiError('Temporary transfer failure', 503));
+    transfer.mockImplementation(async () => { uploaded = true; });
+    manager.start(); await flush();
+    if (kind === 'original') await manager.reselect('submission', new File(['abc'], 'photo.jpg'));
+    await vi.advanceTimersByTimeAsync(2000); await flush();
+    expect(transfer).toHaveBeenCalledOnce();
+    expect(manager.getSnapshot().items[0].local_status).toBe('working');
+
+    // Connectivity changes only after the original/candidate transfer has begun.
+    online = false;
+    rejectDisconnectedTransfer(new UploadApiError('Network disconnected', 0));
+    await flush(); await vi.advanceTimersByTimeAsync(60000); await flush();
+    expect(transfer).toHaveBeenCalledOnce();
+    expect(manager.getSnapshot().items[0].local_status).not.toBe('failed');
+    expect(store.values.get('submission')?.localFailed).not.toBe(true);
+    expect(requests.some(body => body.action === 'browser_failure')).toBe(false);
+
+    online = true;
+    await vi.advanceTimersByTimeAsync(33000); await flush();
+    expect(transfer).toHaveBeenCalledTimes(6); // offline + four connected failures + success
+    expect(manager.getSnapshot().items).toHaveLength(1);
+    expect(manager.getSnapshot().items[0]).toMatchObject({ id: 'submission', phase: completedPhase, outcome: null, pause_reason: null });
+    expect(store.values.get('submission')?.localFailed).not.toBe(true);
+    expect(requests.some(body => body.action === 'browser_failure' || body.action === 'retry')).toBe(false);
+    expect(requests.filter(body => 'id' in body).every(body => 'id' in body && body.id === 'submission')).toBe(true);
+    const identities = requests.filter(body => body.action === (kind === 'original' ? 'admit' : 'candidate'));
+    expect(identities).toHaveLength(6);
+    expect(new Set(identities.map(body => 'request_id' in body ? body.request_id : null)).size).toBe(1);
+    for (const [target, blob] of transfer.mock.calls) {
+      expect(target).toEqual(transfer.mock.calls[0][0]);
+      expect(blob).toBe(transfer.mock.calls[0][1]);
+    }
+    expect(dependencies.process).toHaveBeenCalledTimes(kind === 'candidate' ? 1 : 0);
+    await vi.advanceTimersByTimeAsync(10000); await flush();
+    expect(transfer).toHaveBeenCalledTimes(6);
+  });
+  it.each(transferStages)('keeps %s identity through repeated exhausted/manual retries and never overlaps a held transfer', async (kind, phase, completedPhase) => {
+    vi.useFakeTimers(); vi.spyOn(Math, 'random').mockReturnValue(0);
+    const { manager, dependencies, requests, store } = harness([submission({ phase, gps_acknowledged: kind === 'candidate' })]);
+    let uploaded = false, activeTransfers = 0, peakTransfers = 0;
+    let releaseTransfer!: () => void;
+    const originalRequest = dependencies.api.request;
+    dependencies.api.request = vi.fn(async (body) => {
+      if (body.action === `${kind}_uploaded` && !uploaded)
+        throw new UploadApiError('The object has not reached Storage', 503);
+      return originalRequest(body);
+    });
+    const transfer = vi.mocked(dependencies.api.transfer);
+    transfer.mockImplementation(async () => {
+      activeTransfers++; peakTransfers = Math.max(peakTransfers, activeTransfers);
+      try {
+        if (transfer.mock.calls.length <= 10) throw new UploadApiError('Temporary transfer failure', 503);
+        await new Promise<void>(resolve => { releaseTransfer = resolve; });
+        uploaded = true;
+      } finally { activeTransfers--; }
+    });
+    manager.start(); await flush();
+    if (kind === 'original') await manager.reselect('submission', new File(['abc'], 'photo.jpg'));
+    for (let cycle = 1; cycle <= 2; cycle++) {
+      await vi.advanceTimersByTimeAsync(35000); await flush();
+      expect(transfer).toHaveBeenCalledTimes(cycle * 5);
+      expect(manager.getSnapshot().items[0]).toMatchObject({ id: 'submission', local_status: 'failed', pause_reason: 'technical' });
+      expect(store.values.get('submission')?.localFailed).toBe(true);
+      await vi.advanceTimersByTimeAsync(10000); await flush();
+      expect(transfer).toHaveBeenCalledTimes(cycle * 5);
+      // Multiple clicks must reset the same submission, not admit extra records.
+      await Promise.all([manager.retry('submission'), manager.retry('submission'), manager.retry('submission')]);
+      expect(store.values.get('submission')?.localFailed).toBe(false);
+    }
+    await vi.advanceTimersByTimeAsync(2000); await flush();
+    expect(transfer).toHaveBeenCalledTimes(11);
+    expect(activeTransfers).toBe(1);
+    await Promise.all([manager.retry('submission'), manager.retry('submission'), manager.retry('submission')]);
+    // The underlying immutable transfer deliberately ignores abort until it settles.
+    // Polls/grants must not dispatch another owner while this one still holds its lock.
+    dependencies.channel.onmessage?.({ data: { type: 'grant', ids: ['submission'] } } as MessageEvent);
+    await vi.advanceTimersByTimeAsync(10000); await flush();
+    expect(transfer).toHaveBeenCalledTimes(11);
+    expect(activeTransfers).toBe(1);
+    expect(peakTransfers).toBe(1);
+    releaseTransfer(); await flush(); await vi.advanceTimersByTimeAsync(4000); await flush();
+    expect(activeTransfers).toBe(0);
+    expect(transfer).toHaveBeenCalledTimes(11);
+    expect(manager.getSnapshot().items).toHaveLength(1);
+    expect(manager.getSnapshot().items[0]).toMatchObject({ id: 'submission', phase: completedPhase, outcome: null, pause_reason: null });
+    expect(store.values.size).toBe(1);
+    expect(store.values.get('submission')?.localFailed).toBe(false);
+    expect(requests.filter(body => body.action === 'browser_failure')).toHaveLength(2);
+    expect(requests.filter(body => body.action === 'retry')).toHaveLength(9);
+    expect(requests.filter(body => 'id' in body).every(body => 'id' in body && body.id === 'submission')).toBe(true);
+    const identities = requests.filter(body => body.action === (kind === 'original' ? 'admit' : 'candidate'));
+    expect(identities).toHaveLength(11);
+    const requestIds = identities.map(body => 'request_id' in body ? body.request_id : null);
+    if (kind === 'original') expect(new Set(requestIds).size).toBe(1);
+    else {
+      // Each retained candidate reuses its generation request, but reprocessing
+      // after manual retry must allocate a fresh request for the newly made Blob.
+      expect(new Set(requestIds.slice(0, 5)).size).toBe(1);
+      expect(new Set(requestIds.slice(5, 10)).size).toBe(1);
+      expect(new Set([requestIds[0], requestIds[5], requestIds[10]]).size).toBe(3);
+    }
+    for (const start of [0, 5])
+      for (const [, blob] of transfer.mock.calls.slice(start, start + 5)) expect(blob).toBe(transfer.mock.calls[start][1]);
+    expect(dependencies.process).toHaveBeenCalledTimes(kind === 'candidate' ? 3 : 0);
+  });
+});
 describe('browser WebP capability check', () => {
   function probeHarness(type = 'image/webp', contextAvailable = true) {
     const draw = vi.fn();
@@ -189,6 +401,18 @@ describe('upload lifecycle', () => {
     await manager.enqueue('trip', [new File([], 'empty.jpg'), new File(['abc'], 'valid.jpg')]);
     expect(manager.getSnapshot().items.find((item) => item.filename === 'empty.jpg')?.outcome).toBe('invalid');
     expect(server.size).toBe(1);
+  });
+  it('rejects an unsupported source before admission and continues the valid selection', async () => {
+    const { manager, server, dependencies, requests } = harness(); manager.start(); await flush();
+    vi.mocked(dependencies.validateSource).mockRejectedValueOnce(new Error('Choose a still JPEG, PNG, WebP, or HEIC photo.'));
+    await manager.enqueue('trip', [new File(['text'], 'unsupported.txt'), new File(['abc'], 'valid.jpg')]);
+    expect(manager.getSnapshot().items.find(item => item.filename === 'unsupported.txt')).toMatchObject({
+      outcome: 'invalid', phase: 'complete', cleanup_pending: false, error: expect.stringContaining('still JPEG'),
+    });
+    expect(server.size).toBe(1);
+    expect(requests.filter(request => request.action === 'admit')).toHaveLength(1);
+    expect(dependencies.fingerprint).toHaveBeenCalledOnce();
+    expect(dependencies.api.transfer).not.toHaveBeenCalled();
   });
   it('retries processing four times, frees workers during delays, and retains a visible exhausted failure', async () => {
     vi.useFakeTimers(); vi.spyOn(Math, 'random').mockReturnValue(0);

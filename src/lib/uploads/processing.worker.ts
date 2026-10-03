@@ -15,7 +15,8 @@ async function decodePhoto(source: Blob): Promise<ImageBitmap> {
     let images: ReturnType<typeof decoder.decode> = [];
     try {
       images = decoder.decode(bytes);
-      if (images.length !== 1) throw new Error('HEIC files must contain exactly one photo.');
+      const ids = decoder.decoder ? library.heif_js_context_get_list_of_top_level_image_IDs(decoder.decoder) : [];
+      if (images.length !== 1 || ids.length !== 1) throw new Error('HEIC files must contain exactly one photo.');
       const image = images[0];
       const width = image.get_width(), height = image.get_height();
       imageDimensions(width, height);
@@ -24,7 +25,10 @@ async function decodePhoto(source: Blob): Promise<ImageBitmap> {
         if (data) resolve(); else reject(new Error('The HEIC photo could not be decoded.'));
       }));
       bitmap = await createImageBitmap(pixels);
-    } finally { for (const image of images) image.free(); decoder.decoder?.delete(); }
+    } finally {
+      for (const image of images) image.free();
+      if (decoder.decoder) { library.heif_context_free(decoder.decoder); decoder.decoder = null; }
+    }
   } else {
     bitmap = await createImageBitmap(new Blob([bytes], { type: `image/${format}` }), { imageOrientation: 'from-image' });
   }

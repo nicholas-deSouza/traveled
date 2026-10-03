@@ -163,6 +163,9 @@ jobs:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
         working-directory: source
+      - name: Install classifier test dependencies
+        run: npm ci --prefix infrastructure/photo-classifier --include=optional
+        working-directory: source
       - run: pnpm test
         working-directory: source
       - run: pnpm lint

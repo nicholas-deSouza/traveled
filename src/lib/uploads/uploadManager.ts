@@ -2,7 +2,7 @@ import { UPLOAD_LIMITS, retryDelay, type UploadRequest, type UploadSubmission, t
 import { extractLocation } from '../photoMetadata';
 import { createMetadataStore, type MetadataStore, type UploadMetadata } from './metadataStore';
 import { photoUploadApi, UploadApiError, type PhotoUploadApi } from './photoUploadApi';
-import { assertSourceSize, fingerprint } from './imageValidation';
+import { assertSourceSize, fingerprint, validateSourceFile } from './imageValidation';
 import { processPhoto, precheckPhoto } from './processor';
 import { deviceLimits, ResourcePools, pause, StoppedUpload } from './resourcePools';
 
@@ -28,6 +28,7 @@ export type ManagerDependencies = {
   process(source: Blob, signal: AbortSignal): Promise<Blob>;
   precheck?(source: Blob, signal: AbortSignal): Promise<boolean | null>;
   fingerprint(blob: Blob): Promise<string>;
+  validateSource(file: Blob): Promise<void>;
   gps(file: File): Promise<{ latitude: number | null; longitude: number | null }>;
   online(): boolean; phone: boolean; compatible: boolean;
 };
@@ -39,7 +40,7 @@ export function isUploadCompatible(): boolean {
 export function createRunningUploadManager(userId: string, overrides: Partial<ManagerDependencies> = {}): UploadManager {
   const compatible = overrides.compatible ?? isUploadCompatible();
   const deps: ManagerDependencies = {
-    api: photoUploadApi, process: processPhoto, precheck: precheckPhoto, fingerprint, gps: extractLocation,
+    api: photoUploadApi, process: processPhoto, precheck: precheckPhoto, fingerprint, validateSource: validateSourceFile, gps: extractLocation,
     online: () => navigator.onLine, phone: typeof matchMedia !== 'undefined' && matchMedia('(max-width: 640px) and (pointer: coarse)').matches,
     compatible,
     ...overrides,
@@ -354,7 +355,7 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
           throw new Error('The upload queue can hold at most 100 unfinished photos.');
         for (const file of selected) {
           const id = crypto.randomUUID(), admissionRequest = crypto.randomUUID();
-          try { assertSourceSize(file.size); }
+          try { assertSourceSize(file.size); await deps.validateSource(file); }
           catch (error) {
             const invalid: UploadSubmission = { id, trip_id: tripId, user_id: userId, filename: file.name,
               phase: 'complete', outcome: 'invalid', generation: 0, created_at: new Date().toISOString(),

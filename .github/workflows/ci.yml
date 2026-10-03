@@ -37,6 +37,8 @@ jobs:
         id: changes
         run: node scripts/ci-upload-changes.mjs
       - run: pnpm install --frozen-lockfile
+      - name: Install classifier test dependencies
+        run: npm ci --prefix infrastructure/photo-classifier --include=optional
       - run: pnpm test
       - run: node --test eslint-rules/no-direct-dom.test.mjs
       - run: pnpm lint

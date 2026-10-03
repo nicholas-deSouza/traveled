@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 function load(name, dependencies = {}, globals = {}) {
+  if (name === 'photoMetadata') dependencies = { './photoUploadContract': load('photoUploadContract'), ...dependencies };
   const source = readFileSync(new URL(`../src/lib/${name}.ts`, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const exports = {};
