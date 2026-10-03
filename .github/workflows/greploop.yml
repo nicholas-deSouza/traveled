@@ -163,12 +163,16 @@ jobs:
           node-version: '24'
       - run: pnpm install --frozen-lockfile
         working-directory: source
+      - run: pnpm test
+        working-directory: source
       - run: pnpm lint
         working-directory: source
       - run: pnpm build
         working-directory: source
 
   publish:
+    outputs:
+      sha: ${{ steps.publish.outputs.sha }}
     needs: [intake, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -205,7 +209,8 @@ jobs:
           private-key: ${{ secrets.GREPLOOP_APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - name: Push validated fix and resolve addressed threads
+      - name: Push validated fix, reply to findings, and resolve addressed threads
+        id: publish
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           SNAPSHOT: ${{ needs.intake.outputs.snapshot }}
@@ -232,7 +237,9 @@ jobs:
                 GIT_CONFIG_KEY_0: `http.${context.serverUrl}/.extraheader`,
                 GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${auth}` }
             });
-            await resolveAddressed({ github }, snapshot, result.addressedThreadIds);
+            const publishedSha = execFileSync('git', ['rev-parse', 'HEAD'], options).trim();
+            core.setOutput('sha', publishedSha);
+            await resolveAddressed({ github, context }, snapshot, result, publishedSha);
             await core.summary.addRaw('Validated fix pushed. Greptile and CI will review the new commit. Merge remains manual.').write();
 
   report:
@@ -279,4 +286,4 @@ jobs:
             }
             const needs = JSON.parse(process.env.JOBS);
             const jobs = Object.fromEntries(Object.entries(needs).map(([name, job]) => [name, job.result]));
-            await finishAttempt({ github, context, core }, JSON.parse(process.env.SNAPSHOT), jobs, result);
+            await finishAttempt({ github, context, core }, JSON.parse(process.env.SNAPSHOT), jobs, result, needs.publish.outputs.sha);

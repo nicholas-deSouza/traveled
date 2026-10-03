@@ -8,7 +8,7 @@ const request = { path, bucket: 'photo-quarantine', expected_bytes: 3 };
 const signal = AbortSignal.timeout(1000);
 function configure() {
   process.env.SUPABASE_URL = 'https://project.supabase.co';
-  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-storage-credential';
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_test-storage-credential';
   process.env.SIGHTENGINE_API_USER = 'test-provider-user';
   process.env.SIGHTENGINE_API_SECRET = 'test-provider-credential';
 }
@@ -21,8 +21,20 @@ test('privileged download uses configured origin, authenticated route and bounde
   assert.deepEqual([...await download(request,signal)],[1,2,3]);
   assert.equal(seen[0][0],`https://project.supabase.co/storage/v1/object/authenticated/photo-quarantine/${path}`);
   assert.equal(seen[0][1].redirect,'error');
-  assert.equal(seen[0][1].headers.Authorization,'Bearer test-storage-credential');
+  const headers = new Headers(seen[0][1].headers);
+  assert.equal(headers.get('apikey'),'sb_secret_test-storage-credential');
+  assert.equal(headers.has('authorization'),false);
   await assert.rejects(download({ ...request, expected_bytes: 2 }, signal), /exceeds/);
+});
+test('download rejects missing, publishable and legacy keys before sending a request', async (t) => {
+  configure();
+  const mocked = t.mock.method(globalThis,'fetch',async () => new Response(new Uint8Array([1,2,3])));
+  for (const key of [undefined, '', 'sb_publishable_test', 'legacy-service-role-jwt', 'sb_secret_']) {
+    if (key === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = key;
+    await assert.rejects(download(request,signal), /configuration/);
+  }
+  assert.equal(mocked.mock.callCount(),0);
 });
 test('download refuses errors, oversized headers and non-HTTPS configured origins', async (t) => {
   configure();

@@ -315,7 +315,11 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   const ready = compatible ? (async () => {
     if (overrides.compatible === undefined) {
       try {
-        const probe = await new OffscreenCanvas(1, 1).convertToBlob({ type: 'image/webp' });
+        const canvas = new OffscreenCanvas(1, 1);
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Canvas processing is unavailable.');
+        context.fillRect(0, 0, 1, 1);
+        const probe = await canvas.convertToBlob({ type: 'image/webp' });
         if (probe.type !== 'image/webp') throw new Error('WebP encoding is unavailable.');
       } catch {
         snapshot = { ...snapshot, compatible: false, error: 'Your browser cannot encode WebP photos. Use a current supported browser.' };

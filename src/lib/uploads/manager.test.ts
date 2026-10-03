@@ -7,7 +7,7 @@ vi.mock('./photoUploadApi', async (importOriginal) => ({ ...await importOriginal
 vi.mock('./processor', () => ({ processPhoto: vi.fn(), precheckPhoto: vi.fn(async () => null) }));
 vi.mock('../photoMetadata', () => ({ extractLocation: vi.fn() }));
 const managers: ReturnType<typeof createUploadManager>[] = [];
-afterEach(() => { for (const manager of managers) manager.stop(); managers.length = 0; vi.useRealTimers(); });
+afterEach(() => { for (const manager of managers) manager.stop(); managers.length = 0; vi.useRealTimers(); vi.unstubAllGlobals(); });
 function harness(initial: UploadSubmission[] = []) {
   const server = new Map(initial.map((item) => [item.id, item]));
   const requests: UploadRequest[] = [];
@@ -40,6 +40,48 @@ function harness(initial: UploadSubmission[] = []) {
   return { manager, server, requests, dependencies, store };
 }
 async function flush() { for (let index = 0; index < 40; index++) await Promise.resolve(); }
+describe('browser WebP capability check', () => {
+  function probeHarness(type = 'image/webp', contextAvailable = true) {
+    const draw = vi.fn();
+    class ProbeCanvas {
+      initialized = false;
+      getContext(kind: string) {
+        this.initialized = kind === '2d' && contextAvailable;
+        return this.initialized ? { fillRect: draw } : null;
+      }
+      async convertToBlob() {
+        if (!this.initialized || !draw.mock.calls.length) throw new Error('The canvas is not initialized');
+        return new Blob(['encoded'], { type });
+      }
+    }
+    vi.stubGlobal('OffscreenCanvas', ProbeCanvas);
+    vi.stubGlobal('Worker', class {});
+    vi.stubGlobal('createImageBitmap', vi.fn());
+    vi.stubGlobal('indexedDB', {});
+    vi.stubGlobal('BroadcastChannel', class {});
+    vi.stubGlobal('navigator', { locks: fakeLocks() });
+    vi.stubGlobal('crypto', { subtle: {} });
+    const { dependencies } = harness();
+    const manager = createUploadManager('user', { ...dependencies, compatible: undefined });
+    managers.push(manager);
+    return { manager, draw, dependencies };
+  }
+  it('initializes and draws the probe before encoding, allowing a supported browser to start', async () => {
+    const { manager, draw, dependencies } = probeHarness();
+    manager.start(); await flush();
+    expect(draw).toHaveBeenCalledWith(0, 0, 1, 1);
+    expect(manager.getSnapshot().compatible).toBe(true);
+    expect(manager.getSnapshot().error).toBeNull();
+    expect(dependencies.api.request).toHaveBeenCalledWith({ action: 'list' });
+  });
+  it.each([['image/png', true], ['image/webp', false]])('blocks uploads when encoding returns %s and context availability is %s', async (type, contextAvailable) => {
+    const { manager, dependencies } = probeHarness(type, contextAvailable);
+    manager.start(); await flush();
+    expect(manager.getSnapshot().compatible).toBe(false);
+    expect(manager.getSnapshot().error).toContain('cannot encode WebP');
+    expect(dependencies.api.request).not.toHaveBeenCalled();
+  });
+});
 describe('upload lifecycle', () => {
   it('constructs without effects and supports StrictMode start/stop/start', async () => {
     const { manager, dependencies } = harness();

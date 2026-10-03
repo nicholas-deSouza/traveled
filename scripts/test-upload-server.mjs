@@ -19,9 +19,41 @@ function load(path) {
   return module.exports;
 }
 const {UploadService,invokeClassifier,sameToken}=load(resolve(root,'supabase/functions/_shared/upload-http.ts'));
+const {runtimeConfig}=load(resolve(root,'supabase/functions/_shared/runtime.ts'));
 const {createUploadHandler,readUploadBody,validateCommand}=load(resolve(root,'supabase/functions/photo-upload/handler.ts'));
 const {createWorkerHandler,processJob}=load(resolve(root,'supabase/functions/photo-upload-worker/handler.ts'));
-const config={url:'https://example.supabase.co',serviceKey:'private-service-key',workerToken:'a'.repeat(40),region:'us-west-2',functionName:'classifier',accessKey:'example-key',secretKey:'example-secret'};
+const config={url:'https://example.supabase.co',supabaseSecretKey:'sb_secret_private-test-key',workerToken:'a'.repeat(40),region:'us-west-2',functionName:'classifier',accessKey:'example-key',secretKey:'example-secret'};
+const runtimeSettings={
+  SUPABASE_URL:config.url,SUPABASE_SECRET_KEYS:JSON.stringify({default:config.supabaseSecretKey,other:'sb_secret_unused'}),
+  SUPABASE_SERVICE_ROLE_KEY:'unused-legacy-key',PHOTO_UPLOAD_WORKER_TOKEN:config.workerToken,
+  PHOTO_CLASSIFIER_AWS_REGION:config.region,PHOTO_CLASSIFIER_FUNCTION_NAME:config.functionName,
+  PHOTO_CLASSIFIER_AWS_ACCESS_KEY_ID:config.accessKey,PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY:config.secretKey,
+};
+const loadedConfig=runtimeConfig(name=>runtimeSettings[name]);
+assert.equal(loadedConfig.supabaseSecretKey,config.supabaseSecretKey,'Hosted Edge configuration reads the default modern secret key');
+assert.equal(loadedConfig.sessionToken,undefined);
+for (const value of [undefined,'','invalid JSON','null','[]','{}',JSON.stringify({default:3}),JSON.stringify({default:'sb_publishable_test'}),JSON.stringify({default:'legacy-service-role-jwt'}),JSON.stringify({default:'sb_secret_'})]) {
+  assert.throws(()=>runtimeConfig(name=>name==='SUPABASE_SECRET_KEYS'?value:runtimeSettings[name]),/Supabase secret key|SUPABASE_SECRET_KEYS/,
+    'Missing or invalid secret dictionaries must not fall back to the legacy key');
+}
+const invalidSecret='sb_publishable_do-not-echo-this-value';
+assert.throws(()=>runtimeConfig(name=>name==='SUPABASE_SECRET_KEYS'?JSON.stringify({default:invalidSecret}):runtimeSettings[name]),
+  error=>!error.message.includes(invalidSecret),'Configuration errors must not expose credentials');
+const storageCalls=[];
+const storageService=new UploadService(config,async(url,init)=>{
+  storageCalls.push({url,init});
+  return Response.json({}, {status:url.endsWith('/copy')?409:200});
+});
+await storageService.rpc('upload_health');
+await storageService.copy('source','destination');
+await storageService.remove('photo-quarantine','source');
+await storageService.call('/rest/v1/rpc/upload_health',{headers:new Headers({Authorization:'Bearer stale-key',apikey:'wrong-key'})});
+assert.ok(storageCalls.some(call=>call.url.includes('/object/info/')),'Copy recovery still checks the existing destination');
+for (const {init} of storageCalls) {
+  const headers=new Headers(init.headers);
+  assert.equal(headers.get('apikey'),config.supabaseSecretKey);
+  assert.equal(headers.has('authorization'),false,'Privileged RPC and Storage requests never put an API key in Authorization');
+}
 const uuid='11111111-1111-4111-8111-111111111111';
 const identity={submission_id:uuid,stage:'original',generation:0,attempt_id:uuid};
 const calls=[];
@@ -39,19 +71,19 @@ assert.equal((await api(new Request('https://edge',{method:'POST',body:JSON.stri
 const response=await api(new Request('https://edge',{method:'POST',headers:{Authorization:'Bearer user-token'},body:JSON.stringify({action:'reconcile',id:uuid,user_id:'forged'})}));
 assert.equal(response.status,200);
 assert.equal(JSON.parse(calls.at(-1).init.body).actor,uuid,'Actor must come from authenticated server verification');
-assert.equal(calls[0].init.headers.Authorization,'Bearer user-token');
+assert.equal(new Headers(calls[0].init.headers).get('authorization'),'Bearer user-token');
+assert.equal(new Headers(calls[0].init.headers).get('apikey'),config.supabaseSecretKey);
+assert.equal(new Headers(calls.at(-1).init.headers).has('authorization'),false);
 assert.equal(nudges,1);
-const rejectedTokenCalls=[];
-const rejectedTokenApi=createUploadHandler(new UploadService(config,async(url)=> {
-  rejectedTokenCalls.push(url);
-  return Response.json({error:'Invalid JWT'},{status:401});
-}),()=>assert.fail('An invalid bearer must never schedule work'));
-const rejectedTokenResponse=await rejectedTokenApi(new Request('https://edge',{
-  method:'POST',headers:{Authorization:'Bearer forged-or-expired-token'},
-  body:JSON.stringify({action:'reconcile',id:uuid,user_id:uuid}),
-}));
-assert.equal(rejectedTokenResponse.status,401,'A forged or expired bearer cannot access account operations');
-assert.deepEqual(rejectedTokenCalls,[config.url+'/auth/v1/user'],'Invalid Auth verification must stop before any service-role database call');
+const rejectedAuthCalls=[];
+const rejectedAuthApi=createUploadHandler(new UploadService(config,async(url,init)=>{
+  rejectedAuthCalls.push({url,init});
+  return Response.json({message:'Invalid session'},{status:401});
+}),()=>assert.fail('An invalid session must not nudge the worker'));
+assert.equal((await rejectedAuthApi(new Request('https://edge',{method:'POST',headers:{Authorization:'Bearer expired-user-token'},body:JSON.stringify({action:'list'})}))).status,401);
+assert.equal(rejectedAuthCalls.length,1,'Invalid user JWTs must never reach privileged RPCs');
+assert.ok(rejectedAuthCalls[0].url.endsWith('/auth/v1/user'));
+assert.equal(new Headers(rejectedAuthCalls[0].init.headers).get('authorization'),'Bearer expired-user-token');
 const bodyLimit=16_384;
 const commandPrefix='{"action":"list","padding":"',commandSuffix='"}';
 const boundaryBody=commandPrefix+'x'.repeat(bodyLimit-commandPrefix.length-commandSuffix.length)+commandSuffix;

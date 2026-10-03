@@ -7,7 +7,7 @@ Parameters:
     AllowedPattern: 'https://[a-z0-9.-]+'
   ClassifierSecretArn:
     Type: String
-    Description: Existing Secrets Manager JSON secret with SUPABASE_SERVICE_ROLE_KEY, SIGHTENGINE_API_USER, SIGHTENGINE_API_SECRET.
+    Description: Existing Secrets Manager JSON secret with SUPABASE_SECRET_KEY, SIGHTENGINE_API_USER, SIGHTENGINE_API_SECRET.
 Resources:
   PhotoClassifier:
     Type: AWS::Serverless::Function
@@ -22,7 +22,7 @@ Resources:
       Environment:
         Variables:
           SUPABASE_URL: !Ref SupabaseUrl
-          SUPABASE_SERVICE_ROLE_KEY: !Sub '{{resolve:secretsmanager:${ClassifierSecretArn}:SecretString:SUPABASE_SERVICE_ROLE_KEY}}'
+          SUPABASE_SECRET_KEY: !Sub '{{resolve:secretsmanager:${ClassifierSecretArn}:SecretString:SUPABASE_SECRET_KEY}}'
           SIGHTENGINE_API_USER: !Sub '{{resolve:secretsmanager:${ClassifierSecretArn}:SecretString:SIGHTENGINE_API_USER}}'
           SIGHTENGINE_API_SECRET: !Sub '{{resolve:secretsmanager:${ClassifierSecretArn}:SecretString:SIGHTENGINE_API_SECRET}}'
       Policies:

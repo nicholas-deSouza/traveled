@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 const allJobs = () => ({ upload_database: true, classifier_artifact: true });
 const sharedFiles = new Set([
   '.github/workflows/ci.yml',
+  '.github/workflows/deploy-photo-upload.yml',
+  'scripts/deploy-photo-upload.mjs',
+  'scripts/test-deploy-photo-upload.mjs',
   'scripts/ci-upload-changes.mjs',
   'scripts/test-ci-upload-changes.mjs',
   'src/lib/photoUploadContract.ts',

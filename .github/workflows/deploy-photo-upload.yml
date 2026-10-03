@@ -1,0 +1,94 @@
+name: Deploy photo upload backend
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: photo-upload-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: photo-upload-production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PHOTO_CLASSIFIER_AWS_REGION: ${{ vars.AWS_REGION }}
+      PHOTO_CLASSIFIER_SECRET_ARN: ${{ vars.PHOTO_CLASSIFIER_SECRET_ARN }}
+      PHOTO_CLASSIFIER_STACK_NAME: ${{ vars.PHOTO_CLASSIFIER_STACK_NAME }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      PHOTO_UPLOAD_WORKER_TOKEN: ${{ secrets.PHOTO_UPLOAD_WORKER_TOKEN }}
+      PHOTO_CLASSIFIER_AWS_ACCESS_KEY_ID: ${{ secrets.PHOTO_CLASSIFIER_AWS_ACCESS_KEY_ID }}
+      PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY: ${{ secrets.PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.81.3
+      - uses: aws-actions/setup-sam@v2
+      - name: Check configuration and migration; pause upload admission
+        run: node scripts/deploy-photo-upload.mjs prepare
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Build and smoke-test Linux Lambda contents
+        run: |
+          mkdir -p infrastructure/photo-classifier/dist/lambda
+          docker run --rm --platform linux/amd64 --entrypoint node \
+            -v "$PWD:/workspace:ro" \
+            -v "$PWD/infrastructure/photo-classifier/dist/lambda:/artifact" \
+            public.ecr.aws/sam/build-nodejs24.x \
+            /workspace/infrastructure/photo-classifier/build-artifact.mjs /artifact
+      - name: Deploy IAM-only classifier
+        run: |
+          sam deploy --help >/dev/null
+          sam validate --lint --template-file infrastructure/photo-classifier/template.yaml
+          sam deploy --template-file infrastructure/photo-classifier/template.yaml \
+            --stack-name "$PHOTO_CLASSIFIER_STACK_NAME" --region "$PHOTO_CLASSIFIER_AWS_REGION" \
+            --resolve-s3 --capabilities CAPABILITY_IAM --no-confirm-changeset --no-fail-on-empty-changeset \
+            --parameter-overrides "ParameterKey=SupabaseUrl,ParameterValue=https://$SUPABASE_PROJECT_REF.supabase.co" "ParameterKey=ClassifierSecretArn,ParameterValue=$PHOTO_CLASSIFIER_SECRET_ARN"
+          classifier_arn=$(aws cloudformation describe-stacks --stack-name "$PHOTO_CLASSIFIER_STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ClassifierArn'].OutputValue | [0]" --output text)
+          echo "PHOTO_CLASSIFIER_FUNCTION_NAME=$classifier_arn" >> "$GITHUB_ENV"
+      - name: Verify dedicated Edge invocation credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.PHOTO_CLASSIFIER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ''
+        run: |
+          aws lambda invoke --function-name "$PHOTO_CLASSIFIER_FUNCTION_NAME" \
+            --region "$PHOTO_CLASSIFIER_AWS_REGION" --invocation-type DryRun "$RUNNER_TEMP/classifier-dry-run.json" >/dev/null
+      - name: Configure Edge runtime and Vault
+        run: node scripts/deploy-photo-upload.mjs configure
+      - name: Deploy browser API and worker without local Docker
+        run: |
+          supabase --help >/dev/null
+          supabase functions --help >/dev/null
+          supabase functions deploy --help >/dev/null
+          supabase functions deploy photo-upload --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          supabase functions deploy photo-upload-worker --project-ref "$SUPABASE_PROJECT_REF" --use-api
+      - name: Schedule worker and verify backend
+        run: node scripts/deploy-photo-upload.mjs verify
+      - name: Record next step
+        run: |
+          echo 'Backend deployed and checked. Upload admission remains paused. Complete the live release checks in docs/photo-upload-runbook.md before enabling uploads.' >> "$GITHUB_STEP_SUMMARY"

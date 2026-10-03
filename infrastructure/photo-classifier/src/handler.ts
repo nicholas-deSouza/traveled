@@ -10,9 +10,10 @@ function configuration(name: string) {
 export async function download(request: ClassificationRequest, signal: AbortSignal): Promise<Uint8Array> {
   const base = new URL(configuration('SUPABASE_URL'));
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) throw new Error('Invalid Storage configuration');
-  const key = configuration('SUPABASE_SERVICE_ROLE_KEY');
+  const key = configuration('SUPABASE_SECRET_KEY');
+  if (!key.startsWith('sb_secret_') || key.length <= 'sb_secret_'.length) throw new Error('Invalid Storage credential configuration');
   const url = new URL(`/storage/v1/object/authenticated/${request.bucket}/${request.path.split('/').map(encodeURIComponent).join('/')}`, base);
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${key}`, apikey: key }, signal, redirect: 'error' });
+  const response = await fetch(url, { headers: { apikey: key }, signal, redirect: 'error' });
   if (!response.ok || !response.body) throw new Error('Storage download unavailable');
   const declared = response.headers.get('content-length');
   if (declared && Number(declared) > ORIGINAL_LIMIT) throw new InvalidImage('Image exceeds byte limit');

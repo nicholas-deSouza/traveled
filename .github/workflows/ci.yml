@@ -6,12 +6,13 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -80,6 +81,7 @@ jobs:
           db_url=$(jq -r .DB_URL <<< "$status_json")
           node scripts/prepare-fresh-schema.mjs | psql "$db_url" -v ON_ERROR_STOP=1 >/dev/null
           psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload.sql >/dev/null
+          psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload_pgmq.sql >/dev/null
           psql "$db_url" -v ON_ERROR_STOP=1 -c 'update upload_private.settings set admission_enabled=true' >/dev/null
           node scripts/check-upload-storage.mjs
       - name: Stop disposable services
