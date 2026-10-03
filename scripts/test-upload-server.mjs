@@ -41,6 +41,17 @@ assert.equal(response.status,200);
 assert.equal(JSON.parse(calls.at(-1).init.body).actor,uuid,'Actor must come from authenticated server verification');
 assert.equal(calls[0].init.headers.Authorization,'Bearer user-token');
 assert.equal(nudges,1);
+const rejectedTokenCalls=[];
+const rejectedTokenApi=createUploadHandler(new UploadService(config,async(url)=> {
+  rejectedTokenCalls.push(url);
+  return Response.json({error:'Invalid JWT'},{status:401});
+}),()=>assert.fail('An invalid bearer must never schedule work'));
+const rejectedTokenResponse=await rejectedTokenApi(new Request('https://edge',{
+  method:'POST',headers:{Authorization:'Bearer forged-or-expired-token'},
+  body:JSON.stringify({action:'reconcile',id:uuid,user_id:uuid}),
+}));
+assert.equal(rejectedTokenResponse.status,401,'A forged or expired bearer cannot access account operations');
+assert.deepEqual(rejectedTokenCalls,[config.url+'/auth/v1/user'],'Invalid Auth verification must stop before any service-role database call');
 const bodyLimit=16_384;
 const commandPrefix='{"action":"list","padding":"',commandSuffix='"}';
 const boundaryBody=commandPrefix+'x'.repeat(bodyLimit-commandPrefix.length-commandSuffix.length)+commandSuffix;

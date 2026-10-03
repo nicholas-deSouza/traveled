@@ -58,6 +58,10 @@ Every group member can view and contribute photos to that group’s trips. Photo
 - Keep email authentication enabled and allow the callback URL, including its query parameters, in Supabase's Redirect URLs for each deployed origin. The local wildcard in setup step 5 already covers this flow. Recovery email templates should use Supabase's `{{ .ConfirmationURL }}` link. See [Supabase password authentication](https://supabase.com/docs/guides/auth/passwords).
 - Verify with a test account: sign in by magic link, save a password, sign out, and sign in with that password. Then request a password reset and follow its email; verify mismatched passwords are rejected, a new password works, an expired link offers a retry, and an invitation still opens after setup.
 
+The login, magic-link and recovery forms validate email syntax and reject emoji-containing identifiers before calling Auth, including when browser validation is bypassed. Passwords are passed unchanged to Auth: SQL-like text remains a credential value, never SQL source. Valid addresses such as `drop.table@example.com` are not rejected merely for containing SQL words.
+
+These form checks do not restrict a direct Supabase Auth API caller. If emoji-free account identifiers are a deployment requirement, enforce the same policy with a server-side [Before User Created Auth hook](https://supabase.com/docs/guides/auth/auth-hooks/before-user-created-hook), and test it through the Auth API. Profile display names currently have no emoji restriction. Confirm hosted email verification, password strength/leaked-password protection, CAPTCHA and rate limits in the project dashboard; the local component suite mocks Auth and cannot verify those settings or email delivery.
+
 ### Shared trips
 
 - `/groups` lists only your groups and lets you create one. The creator automatically becomes its owner.
