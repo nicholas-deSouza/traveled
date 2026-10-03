@@ -105,7 +105,7 @@ it('keeps failed expansion recoverable and avoids moving after the popup closes'
   let resolve!: (zoom: number) => void;
   expansion.mockImplementation(() => new Promise(done => { resolve = done; }));
   await userEvent.click(screen.getByRole('button', { name: 'Show locations' }));
-  await userEvent.click(screen.getByRole('button', { name: 'Close', exact: true }));
+  await userEvent.click(screen.getByRole('button', { name: 'Close' }));
   await act(async () => resolve(8));
   expect(map.easeTo).not.toHaveBeenCalled();
 });
