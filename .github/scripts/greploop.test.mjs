@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { allowedPath, validateResult } from './greploop-patch.mjs';
-import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice, resolveAddressed } from './greploop.mjs';
+import { attemptsFrom, decision, eligible, scoreFrom, selectReview, assertCurrent, intake, finishAttempt, startReason, notice, validPullRequest, validThreadConnection, resolveAddressed } from './greploop.mjs';
 
 // All fixture subprocesses must be isolated from the committing repository.
 function exec(command, args, options = {}) {
@@ -28,6 +28,15 @@ const check = { id: 1, app: { slug: 'greptile-apps' }, head_sha: sha,
   status: 'completed', conclusion: 'success', started_at: '2026-09-01T10:00:00Z' };
 const summary = { user: bot, body: `### Confidence Score: 3/5\nLast reviewed: https://github.com/owner/repo/commit/${sha}`,
   updated_at: '2026-09-01T10:03:00Z' };
+
+test('malformed GitHub responses fail with a stage-specific error before publication', async () => {
+  for (const value of [null, {}, { ...pr, labels: null }, { ...pr, head: null }]) assert.equal(validPullRequest(value), false);
+  for (const value of [null, {}, { repository: { pullRequest: null } }, { repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } } } }]) assert.equal(validThreadConnection(value), false);
+  const context = { repo: { owner: 'owner', repo: 'repo' } };
+  await assert.rejects(assertCurrent({ github: { rest: { pulls: { get: async () => ({ data: null }) } } }, context }, { number: 1, sha, branch: 'feature' }),
+    error => error.code === 'invalid_shape' && error.stage === 'pull-request');
+  assert.equal(scoreFrom(null), null);
+});
 
 test('score parsing accepts Greptile formatting but fails closed on ambiguity', () => {
   assert.equal(scoreFrom('### Confidence Score: 3/5'), 3);
@@ -126,7 +135,12 @@ test('publisher replies to each fixed finding with the published commit before r
     threadReplies: [{ threadId: 't1', body: 'Guard missing values. Regression test passes. @someone <img>' },
       { threadId: 't2', body: 'Cancel the pending request when unmounting.' }] };
   const calls = [];
-  const github = { graphql: async (query, variables) => calls.push({ query, ...variables }) };
+  const github = { graphql: async (query, variables) => {
+    calls.push({ query, ...variables });
+    return query.includes('addPullRequestReviewThreadReply')
+      ? { addPullRequestReviewThreadReply: { comment: { id: `reply-${variables.id}` } } }
+      : { resolveReviewThread: { thread: { id: variables.id } } };
+  } };
   await resolveAddressed({ github, context }, snapshot, result, publishedSha);
   assert.equal(calls.length, 4);
   for (const [index, id] of [[0, 't1'], [2, 't2']]) {
@@ -167,10 +181,34 @@ test('a failed reply leaves its finding unresolved and a failed resolution stops
     const github = { graphql: async (query, variables) => {
       calls.push({ query, ...variables });
       if (query.includes(failedMutation)) throw new Error('GitHub rejected the mutation');
+      return { addPullRequestReviewThreadReply: { comment: { id: `reply-${variables.id}` } } };
     } };
-    await assert.rejects(resolveAddressed({ github, context }, snapshot, result, 'b'.repeat(40)), /GitHub rejected/);
+    await assert.rejects(resolveAddressed({ github, context }, snapshot, result, 'b'.repeat(40)),
+      error => error.code === 'api_request_failed' && error.stage === (failedMutation === 'addPullRequestReviewThreadReply' ? 'reply-thread' : 'resolve-thread'));
     assert.equal(calls.length, failedMutation === 'addPullRequestReviewThreadReply' ? 1 : 2);
     assert.ok(calls.every((call) => call.id === 't1'));
+  }
+});
+
+test('malformed mutation responses stop before resolving a finding or replying to the next one', async () => {
+  const snapshot = { sha, threads: [{ id: 't1' }, { id: 't2' }] };
+  const context = { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com' };
+  const result = { summary: 'Fixed', remainingIssues: [], addressedThreadIds: ['t1', 't2'],
+    threadReplies: [{ threadId: 't1', body: 'Guard missing values.' }, { threadId: 't2', body: 'Cancel pending requests.' }] };
+  for (const failedStage of ['reply-thread', 'resolve-thread']) {
+    const calls = [];
+    const github = { graphql: async (query, variables) => {
+      calls.push({ query, ...variables });
+      if (query.includes('addPullRequestReviewThreadReply')) {
+        return failedStage === 'reply-thread' ? { addPullRequestReviewThreadReply: { comment: { id: '' } } }
+          : { addPullRequestReviewThreadReply: { comment: { id: 'reply-t1' } } };
+      }
+      return { resolveReviewThread: { thread: { id: 'wrong-thread' } } };
+    } };
+    await assert.rejects(resolveAddressed({ github, context }, snapshot, result, 'b'.repeat(40)),
+      error => error.code === 'invalid_shape' && error.stage === failedStage);
+    assert.equal(calls.length, failedStage === 'reply-thread' ? 1 : 2);
+    assert.ok(calls.every(call => call.id === 't1'));
   }
 });
 

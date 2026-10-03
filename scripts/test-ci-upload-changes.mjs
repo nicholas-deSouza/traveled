@@ -30,7 +30,8 @@ test('classifier code, fixtures and lockfile select its Linux artifact gate', ()
 test('shared contracts, dependency and routing configuration select both gates', () => {
   for (const path of ['src/lib/photoUploadContract.ts', 'package.json', 'pnpm-lock.yaml', '.github/workflows/ci.yml',
     'scripts/ci-upload-changes.mjs', 'scripts/test-ci-upload-changes.mjs', '.github/workflows/deploy-photo-upload.yml',
-    'scripts/deploy-photo-upload.mjs', 'scripts/test-deploy-photo-upload.mjs']) assert.deepEqual(jobsForPaths([path]), both, path);
+    'scripts/deploy-photo-upload.mjs', 'scripts/test-deploy-photo-upload.mjs',
+    'scripts/script-diagnostics.mjs', 'scripts/test-script-diagnostics.mjs']) assert.deepEqual(jobsForPaths([path]), both, path);
   assert.deepEqual(jobsForPaths(['supabase/tests/photo_upload.sql', 'infrastructure/photo-classifier/src/images.ts']), both);
 });
 

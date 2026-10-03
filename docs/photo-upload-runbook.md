@@ -59,6 +59,22 @@ Rollback by disabling admission with the same setting. Leave moderation/publicat
 
 ## Operations and recovery
 
+### Script diagnostics
+
+Operational Node scripts emit JSON diagnostics to stderr with `script`, `stage` and `event`. Failed operations include a stable `code` and a safe explanation. HTTP diagnostics include the status, a content-type category and, for parsed responses, byte count. Local commands report their stage and exit status. SQL emitted by schema preparation and CI outputs remain on stdout or in their designated output files.
+
+For example, a malformed Vault response now identifies the specific operation:
+
+```json
+{"script":"deploy-photo-upload","stage":"vault.worker-url","event":"failed","code":"invalid_json","message":"Database configuration returned an invalid response: body is not valid JSON.","status":200,"bytes":18,"content_type":"json"}
+```
+
+Use the failing stage and code to distinguish `request_timeout`, `request_failed`, `http_status`, `empty_response`, `unexpected_content_type`, `invalid_json`, `invalid_shape` and `process_failed`. A successful secret write may return no body; database and worker responses must contain valid JSON and the expected fields. An HTTP 500 is a service failure, not a passing Storage access-denial check. CI explicitly reports when unavailable event data or Git history makes it run both validation jobs.
+
+Storage assertions identify the individual check, for example `publication.committed-gallery-readable` with `assertion_failed`. Denial probes require the error code expected for that operation: direct metadata inserts must return HTTP 403 with Postgres code `42501`; immutable uploads can report access denial or an existing object; physical cleanup must report a missing object. An unrelated HTTP 400, invalid JWT, missing bucket or service failure does not pass. Error bodies are read with a 64 KiB limit and are never included in diagnostics.
+
+Diagnostics omit environment values, credentials, request headers, URLs, SQL parameters, response bodies, photo paths and provider/native error text. Do not enable raw response dumps to troubleshoot a failure. Unit tests use injected responses and subprocess fixtures; live Supabase, AWS and Linux native release gates remain necessary after deployment.
+
 Use `public.upload_health()` plus aggregate private job/submission queries to track unfinished work, failed jobs, expired leases, oldest eligible job age, cleanup backlog, quota pauses, project object sizes and outstanding reservations. The budget is 800 MiB across project buckets and outstanding allocations. Initial admission conservatively reserves 48 MiB: 20 MiB original, 20 MiB candidate authorization, and 8 MiB publication. Verified bytes refund reservations; regenerated paths retain their allocations until cleanup.
 
 Server jobs use 120-second leases and bounded 90-second worker requests. Retry cycles have an initial attempt and four retries at 2/4/8/16 seconds plus jitter; quota pauses do not consume attempts. Cleanup progresses independently per object and missing objects count as removed. Exhausted cleanup retries remain discoverable and begin another daily cycle. Operators can invoke service-only `public.upload_retry_cleanup(sid)` for a specific retained cleanup job, after diagnosing the underlying failure.

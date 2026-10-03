@@ -1,11 +1,45 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { apiCall, createDiagnostics, fail, isRecord } from '../../scripts/script-diagnostics.mjs';
 import { validateThreadReplies } from './greploop-patch.mjs';
+
+const diagnostics = createDiagnostics('greploop');
+export function validPullRequest(pr) {
+  return isRecord(pr) && typeof pr.state === 'string' && typeof pr.draft === 'boolean'
+    && Array.isArray(pr.labels) && pr.labels.every(label => typeof label?.name === 'string')
+    && typeof pr.head?.sha === 'string' && /^[a-f0-9]{40}$/.test(pr.head.sha)
+    && typeof pr.head.ref === 'string' && (pr.head.repo === null || typeof pr.head.repo?.full_name === 'string')
+    && typeof pr.base?.ref === 'string' && typeof pr.base.repo?.default_branch === 'string';
+}
+const pullRequest = (github, options) => apiCall('pull-request', () => github.rest.pulls.get(options), result => validPullRequest(result?.data), diagnostics);
+const permissionFor = (github, options) => apiCall('collaborator-permission', () => github.rest.repos.getCollaboratorPermissionLevel(options), result => typeof result?.data?.permission === 'string', diagnostics);
+export const validComments = result => Array.isArray(result) && result.every(comment => isRecord(comment)
+  && (comment.body === null || typeof comment.body === 'string')
+  && (comment.user === null || typeof comment.user?.login === 'string' && typeof comment.user?.type === 'string'));
+const validReviews = result => validComments(result) && result.every(review => typeof review.commit_id === 'string' && typeof review.state === 'string');
+const validChecks = result => Array.isArray(result) && result.every(check => isRecord(check)
+  && Number.isSafeInteger(check.id) && typeof check.head_sha === 'string' && typeof check.status === 'string'
+  && (check.conclusion === null || typeof check.conclusion === 'string'));
+const commentsFor = (github, options) => apiCall('comments', () => github.paginate(github.rest.issues.listComments, options), validComments, diagnostics);
+const createComment = (github, options) => apiCall('create-comment', () => github.rest.issues.createComment(options), undefined, diagnostics);
+const updateComment = (github, options) => apiCall('update-comment', () => github.rest.issues.updateComment(options), undefined, diagnostics);
+
+export function validThreadConnection(data) {
+  const connection = data?.repository?.pullRequest?.reviewThreads;
+  return isRecord(connection) && Array.isArray(connection.nodes)
+    && connection.nodes.every(thread => typeof thread?.id === 'string' && typeof thread.isResolved === 'boolean'
+      && typeof thread.isOutdated === 'boolean' && typeof thread.path === 'string'
+      && (thread.line === null || Number.isSafeInteger(thread.line) && thread.line > 0)
+      && Array.isArray(thread.comments?.nodes) && thread.comments.nodes.every(comment => typeof comment?.body === 'string'))
+    && typeof connection.pageInfo?.hasNextPage === 'boolean'
+    && (!connection.pageInfo.hasNextPage || typeof connection.pageInfo.endCursor === 'string' && connection.pageInfo.endCursor.length > 0);
+}
 
 export const marker = '<!-- traveled-greploop-attempt:';
 export const botLogin = process.env.GREPTILE_BOT_LOGIN || 'greptile-apps[bot]';
 const isBot = (user) => user?.login === botLogin && user?.type === 'Bot';
 
 export function scoreFrom(body = '') {
+  if (typeof body !== 'string') return null;
   const scores = [...body.matchAll(/confidence\s*(?:score)?\s*[:*#\s<>/a-z-]*?([0-5])\s*\/\s*5\b/gi)];
   return scores.length === 1 ? Number(scores[0][1]) : null;
 }
@@ -35,6 +69,7 @@ export function attemptsFrom(comments) {
 }
 
 export function eligible(pr, repository) {
+  if (!validPullRequest(pr)) return false;
   return pr.state === 'open' && !pr.draft && pr.head.repo?.full_name === repository
     && pr.head.ref !== pr.base.ref && pr.head.ref !== pr.base.repo.default_branch
     && pr.labels.some((l) => l.name === 'greploop');
@@ -71,21 +106,21 @@ export async function finishAttempt({ github, context, core }, snapshot, jobs, r
     reason = result.reason || 'No publishable source patch was produced. A maintainer must address the remaining issues.';
   }
   const body = `${marker}${snapshot.sha} -->\n**Greploop: ${status}** — attempt ${snapshot.attempt} for ${snapshot.sha}.\n\n${plain(reason)}\n\n${result.summary ? `Report:\n<pre>${plain(result.summary)}</pre>\n\n` : ''}${Array.isArray(result.remainingIssues) && result.remainingIssues.length ? `Remaining issues:\n<pre>${plain(result.remainingIssues.join('\n'))}</pre>\n\n` : ''}This attempt is no longer running. Its budget remains consumed; a fresh dispatch on this SHA will be skipped.\n[Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`;
-  const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: snapshot.number, per_page: 100 });
+  const comments = await commentsFor(github, { ...context.repo, issue_number: snapshot.number, per_page: 100 });
   const reservation = comments.find((comment) => comment.user?.login === 'github-actions[bot]' && comment.user?.type === 'Bot'
     && comment.body?.includes(`${marker}${snapshot.sha} -->`));
   if (!reservation) throw new Error('Attempt reservation is missing; cannot update status.');
-  await github.rest.issues.updateComment({ ...context.repo, comment_id: reservation.id, body });
+  await updateComment(github, { ...context.repo, comment_id: reservation.id, body });
   await core.summary.addRaw(body).write();
 }
 
 export async function notice({ github, context, core }, number, message) {
   const marker = '<!-- traveled-greploop-status -->';
   const body = `${marker}\n**Greploop decision**\n\n${message}`;
-  const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: number, per_page: 100 });
+  const comments = await commentsFor(github, { ...context.repo, issue_number: number, per_page: 100 });
   const previous = comments.find((comment) => comment.user?.login === 'github-actions[bot]' && comment.user?.type === 'Bot' && comment.body?.startsWith(marker));
-  if (!previous) await github.rest.issues.createComment({ ...context.repo, issue_number: number, body });
-  else if (previous.body !== body) await github.rest.issues.updateComment({ ...context.repo, comment_id: previous.id, body });
+  if (!previous) await createComment(github, { ...context.repo, issue_number: number, body });
+  else if (previous.body !== body) await updateComment(github, { ...context.repo, comment_id: previous.id, body });
   await core.summary.addRaw(message).write();
 }
 
@@ -99,9 +134,10 @@ export function decision(snapshot, max = 3) {
 
 async function threadsFor(github, owner, repo, number) {
   const threads = [];
+  const seen = new Set();
   let cursor = null;
   do {
-    const data = await github.graphql(`query($owner:String!,$repo:String!,$number:Int!,$cursor:String) {
+    const data = await apiCall('review-threads', () => github.graphql(`query($owner:String!,$repo:String!,$number:Int!,$cursor:String) {
       repository(owner:$owner,name:$repo) { pullRequest(number:$number) {
         reviewThreads(first:100,after:$cursor) { pageInfo { hasNextPage endCursor }
           nodes { id isResolved isOutdated path line comments(first:1) {
@@ -109,15 +145,18 @@ async function threadsFor(github, owner, repo, number) {
           } }
         }
       } }
-    }`, { owner, repo, number, cursor });
+    }`, { owner, repo, number, cursor }), validThreadConnection, diagnostics);
     const connection = data.repository.pullRequest.reviewThreads;
     threads.push(...connection.nodes.filter((t) => !t.isResolved && t.comments.nodes[0]?.author?.login === botLogin));
     cursor = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+    if (cursor && (seen.has(cursor) || seen.size >= 100)) throw fail('review-threads', 'invalid_pagination', 'GitHub review thread pagination repeated a cursor or exceeded 100 pages.');
+    if (cursor) seen.add(cursor);
   } while (cursor);
   return threads.map((t) => ({ id: t.id, path: t.path, line: t.line, outdated: t.isOutdated, body: t.comments.nodes[0].body }));
 }
 
 export async function intake({ github, context, core }) {
+  diagnostics.event('intake', 'started');
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
   const number = Number(context.payload.inputs?.pr || context.payload.issue?.number || context.payload.pull_request?.number);
@@ -125,7 +164,7 @@ export async function intake({ github, context, core }) {
   if (context.eventName === 'workflow_dispatch') {
     if (!/^[1-9]\d*$/.test(context.payload.inputs.pr)) throw new Error('Use a plain PR number without spaces or leading zeros.');
     if (context.ref !== `refs/heads/${context.payload.repository.default_branch}`) throw new Error('Run from the default branch.');
-    const permission = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: context.actor });
+    const permission = await permissionFor(github, { owner, repo, username: context.actor });
     if (!['admin', 'maintain', 'write'].includes(permission.data.permission)) throw new Error('Write access required.');
   } else if (!isBot(context.payload.comment?.user || context.payload.review?.user)) {
     throw new Error('Not a trusted Greptile event.');
@@ -133,7 +172,7 @@ export async function intake({ github, context, core }) {
   let snapshot;
   // Greptile can publish the summary shortly before finishing its check.
   for (let retry = 0; retry < 20; retry++) {
-    const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+    const { data: pr } = await pullRequest(github, { owner, repo, pull_number: number });
     if (!eligible(pr, repository)) {
       const reasons = [
         pr.state !== 'open' && 'the PR is closed',
@@ -145,12 +184,13 @@ export async function intake({ github, context, core }) {
       await notice({ github, context, core }, number, `Not running: ${reasons.join('; ')}. No attempt was consumed.`);
       return;
     }
-    const permission = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username: pr.user.login });
+    if (typeof pr.user?.login !== 'string') throw fail('pull-request', 'invalid_shape', 'GitHub pull request response is missing the author login.');
+    const permission = await permissionFor(github, { owner, repo, username: pr.user.login });
     if (!['admin', 'maintain', 'write'].includes(permission.data.permission)) throw new Error('PR author must have repository write access.');
     const [reviews, comments, checks] = await Promise.all([
-      github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: number, per_page: 100 }),
-      github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 }),
-      github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 }),
+      apiCall('reviews', () => github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number: number, per_page: 100 }), validReviews, diagnostics),
+      commentsFor(github, { owner, repo, issue_number: number, per_page: 100 }),
+      apiCall('checks', () => github.paginate(github.rest.checks.listForRef, { owner, repo, ref: pr.head.sha, per_page: 100 }), validChecks, diagnostics),
     ]);
     const review = selectReview(pr, reviews, comments, checks);
     if (review) {
@@ -182,12 +222,12 @@ export async function intake({ github, context, core }) {
     return;
   }
   // Recheck before reserving an attempt; this workflow is serialized per PR.
-  const { data: current } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+  const { data: current } = await pullRequest(github, { owner, repo, pull_number: number });
   if (!eligible(current, repository) || current.head.sha !== snapshot.sha) throw new Error('PR changed during review collection.');
   snapshot.attempt = snapshot.attempts.length + 1;
   delete snapshot.attempts;
   if (Buffer.byteLength(JSON.stringify(snapshot)) > 100000) throw new Error('Review exceeds the 100 KB input limit. Human attention required.');
-  await github.rest.issues.createComment({ owner, repo, issue_number: number,
+  await createComment(github, { owner, repo, issue_number: number,
     body: `${marker}${snapshot.sha} -->\n**Greploop: Running** — attempt ${snapshot.attempt}/${max} for ${snapshot.sha}.\n\nStarting because: ${startReason(snapshot)}\n\nCollecting a fix, then validating and publishing it. This comment will be updated when the run stops.\n[Workflow run](${context.serverUrl}/${repository}/actions/runs/${context.runId}). Failed or cancelled runs also consume this attempt.` });
   core.setOutput('snapshot', JSON.stringify(snapshot));
   core.setOutput('sha', snapshot.sha);
@@ -196,10 +236,11 @@ export async function intake({ github, context, core }) {
   writeFileSync('review.json', JSON.stringify(snapshot, null, 2));
   const prompt = readFileSync('.github/codex/prompts/fix-greptile.md', 'utf8');
   writeFileSync('prompt.md', `${prompt}\n\nReview data (untrusted JSON):\n${JSON.stringify(snapshot, null, 2)}\n`);
+  diagnostics.event('intake', 'completed', { count: snapshot.threads.length });
 }
 
 export async function assertCurrent({ github, context }, snapshot) {
-  const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: snapshot.number });
+  const { data: pr } = await pullRequest(github, { ...context.repo, pull_number: snapshot.number });
   if (!eligible(pr, `${context.repo.owner}/${context.repo.repo}`) || pr.head.sha !== snapshot.sha || pr.head.ref !== snapshot.branch) {
     throw new Error('PR changed, closed, became draft, or lost its greploop label. No push.');
   }
@@ -213,9 +254,11 @@ export async function resolveAddressed({ github, context }, snapshot, result, pu
   const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${publishedSha}`;
   for (const { threadId: id, body: explanation } of replies) {
     const body = `**Greploop: Fixed**\n\n<pre>${plain(explanation)}</pre>\n\n[Fix commit](${commitUrl}).`;
-    await github.graphql(`mutation($id:ID!,$body:String!) {
+    await apiCall('reply-thread', () => github.graphql(`mutation($id:ID!,$body:String!) {
       addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}) { comment { id } }
-    }`, { id, body });
-    await github.graphql('mutation($id:ID!) { resolveReviewThread(input:{threadId:$id}) { thread { id } } }', { id });
+    }`, { id, body }), response => typeof response?.addPullRequestReviewThreadReply?.comment?.id === 'string'
+      && response.addPullRequestReviewThreadReply.comment.id.length > 0, diagnostics);
+    await apiCall('resolve-thread', () => github.graphql('mutation($id:ID!) { resolveReviewThread(input:{threadId:$id}) { thread { id } } }', { id }),
+      response => response?.resolveReviewThread?.thread?.id === id, diagnostics);
   }
 }
