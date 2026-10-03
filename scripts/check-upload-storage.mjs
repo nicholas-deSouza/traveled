@@ -1,6 +1,6 @@
-import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
-import { createDiagnostics, fail, isMain, isRecord, request, runScript, ScriptError } from './script-diagnostics.mjs';
+import { createDiagnostics, fail, isMain, isRecord, parseJSON, readResponseText, request, runScript, ScriptError } from './script-diagnostics.mjs';
 
 // Explicit integration gate for a disposable local Supabase. Never loads .env.
 export function storageConfiguration(env) {
@@ -49,14 +49,40 @@ function expectedStoragePayload(path) {
   return 'a JSON object or array';
 }
 
-export function assertDenied(response) {
-  if (![400, 401, 403, 404, 409].includes(response.status)) throw fail('storage.denial', 'unexpected_status', 'Expected access denial, missing object or immutable-upload conflict; a server failure is not a passing access-control check.', { status: response.status });
+// Match both the operation and the provider error code. Never print provider messages.
+const accessErrors = [[403, ['AccessDenied', 'unauthorized', 'Unauthorized']], [400, ['AccessDenied', 'unauthorized', 'Unauthorized']]];
+const missingErrors = [[404, ['NoSuchKey', 'not_found', 'NotFound']], [400, ['NoSuchKey', 'not_found', 'NotFound']]];
+const duplicateErrors = [[409, ['ResourceAlreadyExists', 'KeyAlreadyExists', 'already_exists', 'Duplicate']], [400, ['ResourceAlreadyExists', 'KeyAlreadyExists', 'already_exists', 'Duplicate']]];
+const denialContracts = {
+  metadata: [[403, ['42501']]],
+  access: accessErrors,
+  unreadable: [...accessErrors, ...missingErrors],
+  immutable: [...accessErrors, ...duplicateErrors],
+  missing: missingErrors,
+};
+export async function assertDenied(response, expectation = 'access', stage = 'storage.denial') {
+  const contract = denialContracts[expectation];
+  if (!contract) throw fail(stage, 'invalid_denial_contract', 'Unknown Storage denial expectation.');
+  const details = { status: response.status };
+  if (!contract.some(([status]) => status === response.status)) {
+    throw fail(stage, 'unexpected_status', `Expected ${expectation} denial; unrelated HTTP failures do not prove this gate.`, details);
+  }
+  const text = await readResponseText(response, stage, 'Denial check', details, 64 * 1024);
+  const payload = parseJSON(text, stage, 'Denial check', isRecord, details, 'a provider error object');
+  const code = payload.code ?? payload.error;
+  if (!contract.some(([status, codes]) => status === response.status && codes.includes(code))) {
+    throw fail(stage, 'unexpected_denial', `Expected ${expectation} denial; the provider error does not establish this gate.`, details);
+  }
 }
 
 export async function runStorageChecks(env = process.env, fetchRequest = fetch, diagnostics = createDiagnostics('check-upload-storage')) {
 const { origin, serviceKey, anonKey } = storageConfiguration(env);
 let gate = 'setup';
 const mark = stage => { gate = stage; diagnostics.event(stage, 'started'); };
+const check = (condition, name, message, details) => {
+  if (!condition) throw fail(`${gate}.${name}`, 'assertion_failed', message, details);
+};
+const denied = (response, expectation, name) => assertDenied(response, expectation, `${gate}.${name}`);
 try {
 async function http(path, token = serviceKey, options = {}) {
   const response = await request(fetchRequest, origin + path, { ...options, headers: { apikey: anonKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...options.headers } }, {
@@ -73,7 +99,7 @@ async function json(path, token, body, method = 'POST') {
 }
 mark('setup');
 const account = await json('/auth/v1/signup', anonKey, { email: `upload-${randomUUID()}@example.test`, password: randomUUID() + 'aA1!' });
-assert.ok(account.access_token, 'Disable signup email confirmation in the disposable test instance');
+check(account.access_token, 'signup-session', 'Disable signup email confirmation in the disposable test instance.');
 const token = account.access_token, actor = account.user.id;
 const group = await json('/rest/v1/rpc/create_group', token, { group_name: 'Disposable upload integration' });
 const [trip] = await request(fetchRequest, origin + '/rest/v1/trips', { method: 'POST', headers: { apikey: anonKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Prefer: 'return=representation' }, body: JSON.stringify({ group_id: group, title: 'Upload test', created_by: actor }) }, {
@@ -88,17 +114,18 @@ const id = randomUUID();
 mark('admission');
 const admission = { action: 'admit', id, request_id: randomUUID(), trip_id: trip.id, filename: 'fixture.png', source_sha256: sha(source), source_bytes: source.length };
 const admitted = await command(admission);
-assert.deepEqual((await command(admission)).target, admitted.target);
+check(isDeepStrictEqual((await command(admission)).target, admitted.target), 'idempotent-target', 'Repeated admission must return the same upload target.');
 const upload = (target, bytes, mime, uploader = token) => http(`/storage/v1/object/${target.bucket}/${target.path}`, uploader, { method: 'POST', body: bytes, headers: { 'Content-Type': mime, 'x-upsert': 'false' } });
-assert.ok((await upload(admitted.target, source, 'image/png')).ok);
-assertDenied(await upload(admitted.target, source, 'image/png'));
-assertDenied(await http(`/storage/v1/object/authenticated/photo-quarantine/${admitted.target.path}`, token));
+const originalUpload = await upload(admitted.target, source, 'image/png');
+check(originalUpload.ok, 'original-upload', 'Admitted original upload must succeed.', { status: originalUpload.status });
+await denied(await upload(admitted.target, source, 'image/png'), 'immutable', 'immutable-original');
+await denied(await http(`/storage/v1/object/authenticated/photo-quarantine/${admitted.target.path}`, token), 'unreadable', 'unapproved-original');
 await command({ action: 'original_uploaded', id });
 async function claim(stage) {
   for (let attempt = 0; attempt < 12; attempt++) {
     const job = await rpc('upload_claim', {});
     if (job?.submission_id === id && job.stage === stage) return job;
-    assert.ok(!job, 'Unexpected work in disposable instance');
+    check(!job, 'claimed-job', 'Unexpected work in the disposable instance.');
     await new Promise(resolve => setTimeout(resolve, 1100));
   }
   throw fail(gate, 'job_not_ready', `No durable ${stage} job became available within the polling limit.`);
@@ -108,34 +135,37 @@ async function claim(stage) {
 const originalJob = await claim('original');
 mark('original-approval');
 await rpc('upload_finish', { result: { ...originalJob, outcome: 'approved', sha256: sha(source), bytes: source.length } });
-assert.ok((await http(`/storage/v1/object/authenticated/photo-quarantine/${admitted.target.path}`, token)).ok);
+const approvedOriginal = await http(`/storage/v1/object/authenticated/photo-quarantine/${admitted.target.path}`, token);
+check(approvedOriginal.ok, 'approved-original-readable', 'Approved original object must be readable.', { status: approvedOriginal.status });
 await command({ action: 'gps', id, latitude: 0, longitude: 0 });
 const allocated = await command({ action: 'candidate', id, request_id: randomUUID() });
 mark('candidate-approval');
-assert.ok((await upload(allocated.target, candidate, 'image/webp')).ok);
+const candidateUpload = await upload(allocated.target, candidate, 'image/webp');
+check(candidateUpload.ok, 'candidate-upload', 'Allocated candidate upload must succeed.', { status: candidateUpload.status });
 await command({ action: 'candidate_uploaded', id, generation: allocated.target.generation, sha256: sha(candidate), bytes: candidate.length });
 const candidateJob = await claim('candidate');
 await rpc('upload_finish', { result: { ...candidateJob, outcome: 'approved', sha256: sha(candidate), bytes: candidate.length } });
 const publication = await claim('publication');
 mark('publication');
 const direct = await http('/rest/v1/photos', token, { method: 'POST', body: JSON.stringify({ id, trip_id: trip.id, uploaded_by: actor, storage_path: publication.destination }) });
-assertDenied(direct);
-assertDenied(await upload({ bucket: 'trip-photos', path: publication.destination }, candidate, 'image/webp'));
+await denied(direct, 'metadata', 'client-metadata-insert');
+await denied(await upload({ bucket: 'trip-photos', path: publication.destination }, candidate, 'image/webp'), 'access', 'client-gallery-upload');
 await json('/storage/v1/object/copy', serviceKey, { bucketId: 'photo-quarantine', sourceKey: publication.source, destinationKey: publication.destination, destinationBucket: 'trip-photos' });
 const galleryPath = `/storage/v1/object/authenticated/trip-photos/${publication.destination}`;
-assertDenied(await http(galleryPath, token));
+await denied(await http(galleryPath, token), 'unreadable', 'uncommitted-gallery');
 await rpc('upload_finish', { result: { ...publication, outcome: 'published' } });
-assert.ok((await http(galleryPath, token)).ok, 'Committed gallery object is readable');
+const committedGallery = await http(galleryPath, token);
+check(committedGallery.ok, 'committed-gallery-readable', 'Committed gallery object must be readable.', { status: committedGallery.status });
 const metadata = await json(`/rest/v1/photos?id=eq.${id}&select=id,latitude,longitude`, token, undefined, 'GET');
-assert.deepEqual(metadata, [{ id, latitude: 0, longitude: 0 }]);
+check(isDeepStrictEqual(metadata, [{ id, latitude: 0, longitude: 0 }]), 'published-gps', 'Published metadata must contain the admitted photo and its GPS coordinates.');
 mark('cleanup');
 await command({ action: 'delete', id });
-assertDenied(await http(galleryPath, token));
+await denied(await http(galleryPath, token), 'unreadable', 'deleted-gallery');
 const cleanup = await claim('cleanup');
 for (const object of cleanup.objects) await json(`/storage/v1/object/${object.bucket}`, serviceKey, { prefixes: [object.path] }, 'DELETE');
 await rpc('upload_finish', { result: { ...cleanup, outcome: 'cleaned', removed: cleanup.objects } });
-assert.equal((await command({ action: 'reconcile', id })).submission.cleanup_pending, false);
-assertDenied(await http(galleryPath, serviceKey));
+check((await command({ action: 'reconcile', id })).submission.cleanup_pending === false, 'cleanup-complete', 'Reconciliation must confirm physical cleanup is complete.');
+await denied(await http(galleryPath, serviceKey), 'missing', 'physical-gallery-removal');
 console.log('Disposable Storage gates, immutable transfers, publication, GPS and physical cleanup passed.');
 diagnostics.event('storage-gates', 'completed');
 } catch (error) {

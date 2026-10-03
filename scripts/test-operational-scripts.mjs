@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { createDiagnostics } from './script-diagnostics.mjs';
 import { freshSchema } from './prepare-fresh-schema.mjs';
 import { checkComponentTests } from './check-component-tests.mjs';
-import { storageConfiguration, validStoragePayload, assertDenied, runStorageChecks } from './check-upload-storage.mjs';
+import { storageConfiguration, validStoragePayload, runStorageChecks } from './check-upload-storage.mjs';
 import { validReviewReport } from './review-staged.mjs';
 import { buildArtifact } from '../infrastructure/photo-classifier/build-artifact.mjs';
 
@@ -80,8 +80,6 @@ test('Storage response contracts validate target, job and completion fields befo
   assert.equal(validStoragePayload('/rest/v1/rpc/upload_finish', false), false);
   assert.equal(validStoragePayload('/rest/v1/rpc/upload_finish', true), true);
   assert.equal(validStoragePayload('/rest/v1/rpc/upload_command', { submission: { id: uuid } }, { command: { action: 'candidate' } }), false);
-  for (const status of [400, 401, 403, 404, 409]) assert.doesNotThrow(() => assertDenied(new Response(null, { status })));
-  for (const status of [200, 429, 500]) assert.throws(() => assertDenied(new Response(null, { status })), error => error.code === 'unexpected_status' && error.details.status === status);
 });
 
 test('review reports reject missing and malformed findings before displaying results', () => {

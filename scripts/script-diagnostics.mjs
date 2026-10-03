@@ -82,7 +82,7 @@ function contentType(response) {
   return type.startsWith('text/') ? 'text' : 'other';
 }
 
-async function bodyText(response, stage, label, details, maxBytes) {
+export async function readResponseText(response, stage, label, details = {}, maxBytes = 1024 * 1024) {
   if (!response.body) return '';
   const reader = response.body.getReader();
   const chunks = [];
@@ -136,7 +136,7 @@ export async function request(fetchRequest, url, options, {
       diagnostics?.event(stage, 'completed', { ...details, duration_ms: Date.now() - started });
       return response;
     }
-    const text = await bodyText(response, stage, label, details, maxBytes);
+    const text = await readResponseText(response, stage, label, details, maxBytes);
     // Check emptiness before content type so empty successful responses have a precise diagnosis.
     if (text.trim() && details.content_type !== 'json') {
       throw fail(stage, 'unexpected_content_type', `${label} returned an invalid response: expected application/json.`, { ...details, bytes: Buffer.byteLength(text) });
