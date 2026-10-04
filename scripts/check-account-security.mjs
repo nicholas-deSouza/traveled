@@ -2,6 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { storageConfiguration } from './check-upload-storage.mjs';
 import { createDiagnostics, fail, isMain, isRecord, request, runScript } from './script-diagnostics.mjs';
 
+function isSignupPolicyRejection(value) {
+  if (!isRecord(value) || value.access_token || value.user) return false;
+  const codes = [value.error_code, value.code];
+  const messages = [value.msg, value.message, value.error_description];
+  // Raw Auth HTTP responses use error_code (code may be the HTTP number),
+  // while SDK-style responses use code. Native syntax validation precedes
+  // our hook: accept its specific format failure, not every validation_failed.
+  return messages.includes('Enter a valid email address using only ASCII characters.') ||
+    codes.includes('email_address_invalid') ||
+    (codes.includes('validation_failed') && messages.includes('Unable to validate email address: invalid format'));
+}
+
 // Only disposable localhost Supabase; never loads .env or emits identities/tokens.
 export async function runAccountChecks(env = process.env, fetchRequest = fetch, diagnostics = createDiagnostics('check-account-security')) {
   const { origin, serviceKey, anonKey } = storageConfiguration(env);
@@ -42,8 +54,7 @@ export async function runAccountChecks(env = process.env, fetchRequest = fetch, 
       body: JSON.stringify({ email, password: randomUUID() + 'aA1!' }),
     }, {
       stage, label: 'Invalid disposable signup', json: true, statuses: [400, 422], diagnostics,
-      validate: value => isRecord(value) && !value.access_token &&
-        (value.code === 'email_address_invalid' || [value.msg, value.message, value.error_description].includes('Enter a valid email address using only ASCII characters.')),
+      validate: isSignupPolicyRejection,
       expected: 'an email-validation rejection; unrelated service failures do not prove enforcement',
     });
   }

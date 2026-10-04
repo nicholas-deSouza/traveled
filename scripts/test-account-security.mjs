@@ -39,6 +39,48 @@ test('account API gate refuses hosted origins before any requests', async () => 
 test('account API gate accepts current peers, populated embeds and removal', async () => {
   await runAccountChecks(env, api(), quiet);
 });
+
+function policyApi(value, status = 400) {
+  const validApi = api();
+  let invalidSignups = 0;
+  return (url, options) => {
+    if (new URL(url).pathname === '/auth/v1/signup' && !JSON.parse(options.body).data && ++invalidSignups > 1) {
+      return Response.json(value, { status });
+    }
+    return validApi(url, options);
+  };
+}
+
+test('policy checks accept native Auth format errors after independent hook activation', async () => {
+  for (const value of [
+    { code: 400, error_code: 'validation_failed', msg: 'Unable to validate email address: invalid format' },
+    { code: 'validation_failed', message: 'Unable to validate email address: invalid format' },
+    { code: 422, error_code: 'email_address_invalid', msg: 'Invalid email' },
+  ]) await runAccountChecks(env, policyApi(value), quiet);
+});
+
+test('policy checks reject unrelated validation, service failures and returned accounts', async () => {
+  for (const value of [
+    { error_code: 'validation_failed', msg: 'Invalid password' },
+    { error_code: 'validation_failed' },
+    { error_code: 'hook_timeout', msg: 'Unable to validate email address: invalid format' },
+    { msg: 'Unable to validate email address: invalid format' },
+    { error_code: 'email_provider_disabled', msg: 'Email signups are disabled' },
+    { error_code: 'validation_failed', msg: 'Unable to validate email address: invalid format', user: { id: 'unexpected' } },
+    { error_code: 'email_address_invalid', access_token: 'unexpected' },
+  ]) await assert.rejects(runAccountChecks(env, policyApi(value), quiet), { stage: 'signup-policy', code: 'invalid_shape' });
+  await assert.rejects(runAccountChecks(env, policyApi({ error_code: 'email_address_invalid' }, 500), quiet), { stage: 'signup-policy', code: 'http_status' });
+});
+
+test('native format validation never substitutes for custom hook activation', async () => {
+  const validApi = api();
+  await assert.rejects(runAccountChecks(env, (url, options) => {
+    if (new URL(url).pathname === '/auth/v1/signup' && !JSON.parse(options.body).data) {
+      return Response.json({ code: 400, error_code: 'validation_failed', msg: 'Unable to validate email address: invalid format' }, { status: 400 });
+    }
+    return validApi(url, options);
+  }, quiet), { stage: 'hook-activation', code: 'invalid_shape' });
+});
 test('account API gate detects global profile enumeration', async () => {
   await assert.rejects(runAccountChecks(env, api({ leak: true }), quiet), { code: 'self-only' });
 });
