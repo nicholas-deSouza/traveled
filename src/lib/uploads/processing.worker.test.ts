@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { optimizePhoto } from './processing.worker';
 
 const heif = vi.hoisted(() => ({ initialize: vi.fn() }));
-vi.mock('libheif-js/libheif-wasm/libheif-bundle.mjs', () => ({ default: heif.initialize }));
+vi.mock('./heicDecoder', () => ({ initializeHeicDecoder: heif.initialize }));
 const jpeg = () => new Blob([new Uint8Array([255, 216, 255])], { type: 'image/jpeg' });
 const heic = () => new Blob([new Uint8Array([0, 0, 0, 24, ...new TextEncoder().encode('ftypheic')])]);
 let bitmap: { width: number; height: number; close: ReturnType<typeof vi.fn> };
@@ -32,7 +32,7 @@ function decoderFixture(ids = [1], count = 1, failsDisplay = false) {
     display: vi.fn((pixels: ImageData, done: (pixels: ImageData | null) => void) => done(failsDisplay ? null : pixels)) };
   const images = Array.from({ length: count }, () => ({ ...image, free: vi.fn() }));
   const decode = vi.fn(() => images), free = vi.fn();
-  const decoder = { decoder: context as object | null, decode };
+  const decoder = { decoder: context as object | number | null, decode };
   heif.initialize.mockResolvedValue({ HeifDecoder: class { constructor() { return decoder; } },
     heif_js_context_get_list_of_top_level_image_IDs: vi.fn(() => ids), heif_context_free: free });
   return { context, images, decoder, free };
@@ -86,5 +86,23 @@ describe('actual photo-processing implementation', () => {
     await expect(optimizePhoto(heic())).rejects.toThrow('could not be decoded');
     expect(fixture.free).toHaveBeenCalledOnce();
     expect(fixture.images[0].free).toHaveBeenCalledOnce();
+  });
+  it('checks HEIC decoded dimensions before allocating/displaying pixels', async () => {
+    const fixture = decoderFixture();
+    fixture.images[0].get_width = () => 10000;
+    fixture.images[0].get_height = () => 5001;
+    await expect(optimizePhoto(heic())).rejects.toThrow('50 megapixels');
+    expect(fixture.images[0].display).not.toHaveBeenCalled();
+    expect(createImageBitmap).not.toHaveBeenCalled();
+    expect(fixture.images[0].free).toHaveBeenCalledOnce();
+    expect(fixture.free).toHaveBeenCalledOnce();
+  });
+  it('releases the HEIC context if the decoder throws before returning handles', async () => {
+    const fixture = decoderFixture();
+    fixture.decoder.decode.mockImplementation(() => { throw new Error('Decoder security limit exceeded'); });
+    await expect(optimizePhoto(heic())).rejects.toThrow('security limit');
+    expect(createImageBitmap).not.toHaveBeenCalled();
+    expect(fixture.free).toHaveBeenCalledOnce();
+    expect(fixture.decoder.decoder).toBeNull();
   });
 });

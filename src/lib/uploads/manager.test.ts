@@ -41,6 +41,106 @@ function harness(initial: UploadSubmission[] = []) {
 }
 async function flush() { for (let index = 0; index < 40; index++) await Promise.resolve(); }
 const unfinishedStages: UploadPhase[] = ['original_upload', 'original_check', 'gps', 'processing', 'candidate_upload', 'candidate_check', 'publication'];
+it('dismisses only finished visible results and retains dismissal across polling and restart', async () => {
+  vi.useFakeTimers();
+  const { manager, requests, store } = harness([
+    submission({ id: 'active', phase: 'original_check' }),
+    submission({ id: 'invalid', phase: 'complete', outcome: 'invalid' }),
+    submission({ id: 'published', phase: 'complete', outcome: 'published' }),
+  ]);
+  manager.start(); await flush();
+  await manager.clearFinished();
+  expect(manager.getSnapshot().items.map(item => item.id)).toEqual(['active', 'published']);
+  expect(store.values.get('invalid')?.dismissed).toBe(true);
+  expect(store.values.get('active')?.dismissed).not.toBe(true);
+  await vi.advanceTimersByTimeAsync(2500); await flush();
+  manager.stop(); manager.start(); await flush();
+  expect(manager.getSnapshot().items.map(item => item.id)).toEqual(['active', 'published']);
+  expect(requests.some(request => ['cancel', 'delete', 'retry'].includes(request.action))).toBe(false);
+});
+it('retains Clear after delayed logout and a fresh login, including local-only invalid results', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies, store } = harness([
+    submission({ id: 'rejected', phase: 'complete', outcome: 'rejected' }),
+    submission({ id: 'active', phase: 'original_check' }),
+  ]);
+  store.close = vi.fn();
+  const clear = vi.spyOn(store, 'clear');
+  vi.mocked(dependencies.validateSource).mockRejectedValueOnce(new Error('Invalid image'));
+  manager.start(); await flush();
+  await manager.enqueue('trip', [new File(['invalid'], 'invalid.jpg')]);
+  const localId = manager.getSnapshot().items.find(item => item.filename === 'invalid.jpg')!.id;
+  await manager.clearFinished();
+  manager.stop();
+  await vi.advanceTimersByTimeAsync(5000); await flush();
+  expect(manager.getSnapshot().items).toEqual([]);
+  expect(store.close).toHaveBeenCalledOnce();
+  expect(clear).not.toHaveBeenCalled();
+  expect(store.values.get(localId)?.dismissed).toBe(true);
+  const relogged = createUploadManager('user', { ...dependencies, channel: fakeChannel() });
+  managers.push(relogged); relogged.start(); await flush();
+  await vi.advanceTimersByTimeAsync(4000); await flush();
+  expect(relogged.getSnapshot().items.map(item => item.id)).toEqual(['active']);
+  expect(store.values.get('rejected')?.dismissed).toBe(true);
+});
+it('keeps account dismissals isolated through account switch and return', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies, store } = harness([
+    submission({ id: 'mine', phase: 'complete', outcome: 'invalid' }),
+    submission({ id: 'theirs', user_id: 'other-user', phase: 'complete', outcome: 'invalid' }),
+  ]);
+  manager.start(); await flush(); await manager.clearFinished(); manager.stop();
+  await vi.advanceTimersByTimeAsync(5000); await flush();
+  // Include foreign cached rows to verify owner filtering at both store and API boundaries.
+  const otherStore = memoryStore();
+  await otherStore.put(store.values.get('mine')!);
+  const other = createUploadManager('other-user', { ...dependencies, store: otherStore, channel: fakeChannel() });
+  managers.push(other); other.start(); await flush();
+  expect(other.getSnapshot().items.map(item => item.id)).toEqual(['theirs']);
+  await other.clearFinished(); other.stop();
+  await vi.advanceTimersByTimeAsync(5000); await flush();
+  const returned = createUploadManager('user', { ...dependencies, channel: fakeChannel() });
+  managers.push(returned); returned.start(); await flush();
+  expect(returned.getSnapshot().items).toEqual([]);
+  expect(store.values.has('theirs')).toBe(false);
+  expect(otherStore.values.get('theirs')?.dismissed).toBe(true);
+  expect(store.values.get('mine')?.dismissed).toBe(true);
+});
+it('does not resume stopped-account recovery when metadata resolves after logout', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies, store } = harness();
+  let resolveList!: (values: Awaited<ReturnType<typeof store.list>>) => void;
+  dependencies.store = { ...store, list: () => new Promise(resolve => { resolveList = resolve; }) };
+  const delayed = createUploadManager('user', dependencies);
+  managers.push(delayed); delayed.start(); manager.stop(); delayed.stop();
+  await vi.advanceTimersByTimeAsync(5000);
+  resolveList([{ submission: submission(), admissionRequest: 'stable', candidateRequest: null, originalAcknowledged: false }]);
+  await flush();
+  expect(delayed.getSnapshot().items).toEqual([]);
+  expect(dependencies.api.request).not.toHaveBeenCalled();
+  expect(dependencies.channel.onmessage).toBeNull();
+  expect(store.values.size).toBe(0);
+});
+it('ignores a previous account list response arriving after delayed logout and account switch', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies, store } = harness([
+    submission({ id: 'other-active', user_id: 'other-user', phase: 'original_check' }),
+  ]);
+  let resolveList!: (response: UploadResponse) => void;
+  vi.mocked(dependencies.api.request).mockImplementationOnce(() => new Promise(resolve => { resolveList = resolve; }));
+  manager.start(); await flush();
+  expect(dependencies.api.request).toHaveBeenCalledWith({ action: 'list' });
+  manager.stop(); await vi.advanceTimersByTimeAsync(5000); await flush();
+  const other = createUploadManager('other-user', { ...dependencies, store: memoryStore(), channel: fakeChannel() });
+  managers.push(other); other.start(); await flush();
+  resolveList({ submissions: [submission({ id: 'late-old-account', phase: 'original_check' })] });
+  await flush();
+  expect(manager.getSnapshot().items).toEqual([]);
+  expect(store.values.size).toBe(0);
+  expect(dependencies.channel.onmessage).toBeNull();
+  expect(dependencies.channel.postMessage).not.toHaveBeenCalled();
+  expect(other.getSnapshot().items.map(item => item.id)).toEqual(['other-active']);
+});
 describe('interruption stage matrix (isolated server and browser resources)', () => {
   it.each(unfinishedStages)('cancels %s before reconnect and does not restart browser work', async (phase) => {
     vi.useFakeTimers();
@@ -113,7 +213,7 @@ describe('interruption stage matrix (isolated server and browser resources)', ()
     const { manager, dependencies, server, store } = harness([submission({ phase: 'original_check' })]);
     manager.start(); await flush(); manager.stop(); await vi.advanceTimersByTimeAsync(0); await flush();
     expect(manager.getSnapshot().items).toEqual([]);
-    expect(store.values.size).toBe(0);
+    expect(store.values.has('submission')).toBe(true);
     expect(dependencies.channel.close).toHaveBeenCalledOnce();
     expect(server.has('submission')).toBe(true);
     server.set('other-submission', submission({ id: 'other-submission', user_id: 'other-user', phase: 'original_check' }));
@@ -525,7 +625,7 @@ describe('upload lifecycle', () => {
     expect(vi.mocked(dependencies.api.transfer).mock.calls[0][0].generation).toBe(0);
     vi.restoreAllMocks();
   });
-  it('preserves an unadmitted identity through StrictMode restart and clears it after a final stop', async () => {
+  it('preserves an unadmitted identity through StrictMode restart and final stop', async () => {
     vi.useFakeTimers();
     const { manager, store, requests } = harness();
     await store.put({ submission: submission({ id: 'pending-before-mount' }), admissionRequest: 'stable-admission',
@@ -539,7 +639,7 @@ describe('upload lifecycle', () => {
     expect(requests).toContainEqual({ action: 'admit', id: 'pending-before-mount', request_id: 'stable-admission',
       trip_id: 'trip', filename: 'reselected.jpg', source_sha256: 'sha', source_bytes: 3 });
     manager.stop(); expect(manager.getSnapshot().items).toEqual([]);
-    await vi.advanceTimersByTimeAsync(0); await flush(); expect(store.values.size).toBe(0);
+    await vi.advanceTimersByTimeAsync(0); await flush(); expect(store.values.has('pending-before-mount')).toBe(true);
   });
   it('allows a manual retry cycle for an admission the server never received', async () => {
     vi.useFakeTimers(); vi.spyOn(Math, 'random').mockReturnValue(0);

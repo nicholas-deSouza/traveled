@@ -8,9 +8,8 @@ async function decodePhoto(source: Blob): Promise<ImageBitmap> {
   const format = imageFormat(bytes);
   let bitmap: ImageBitmap;
   if (format === 'heic') {
-    const { default: initialize } = await import('libheif-js/libheif-wasm/libheif-bundle.mjs');
-    const library = await initialize();
-    await library.ready;
+    const { initializeHeicDecoder } = await import('./heicDecoder');
+    const library = await initializeHeicDecoder();
     const decoder = new library.HeifDecoder();
     let images: ReturnType<typeof decoder.decode> = [];
     try {
