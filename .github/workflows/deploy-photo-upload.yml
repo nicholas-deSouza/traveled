@@ -1,6 +1,22 @@
 name: Deploy photo upload backend
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-photo-upload.yml'
+      - 'infrastructure/photo-classifier/src/**'
+      - 'infrastructure/photo-classifier/template.yaml'
+      - 'infrastructure/photo-classifier/build-artifact.mjs'
+      - 'infrastructure/photo-classifier/package.json'
+      - 'infrastructure/photo-classifier/package-lock.json'
+      - 'infrastructure/photo-classifier/tsconfig.json'
+      - 'scripts/deploy-photo-upload.mjs'
+      - 'scripts/script-diagnostics.mjs'
+      - 'src/lib/photoUploadContract.ts'
+      - 'supabase/config.toml'
+      - 'supabase/functions/**'
+      - 'supabase/migrations/**'
   workflow_dispatch:
 
 permissions:

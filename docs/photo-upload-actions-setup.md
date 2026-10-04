@@ -4,7 +4,7 @@ The database migration is complete, as reported by the operator. The workflow ch
 
 ## What the workflow does
 
-[Deploy photo upload backend](../.github/workflows/deploy-photo-upload.yml) is a manual workflow on `main`. It first runs the full existing CI, including disposable SQL/Storage tests and Linux classifier smoke tests. PRs and pushes continue to run validation; they do not deploy production.
+[Deploy photo upload backend](../.github/workflows/deploy-photo-upload.yml) runs automatically after a push to `main` when deploy-relevant backend paths change: Supabase functions, migrations or config; classifier source/build inputs; deployment scripts; the shared upload contract; or this workflow. Documentation-only and unrelated UI changes do not deploy production. It first runs the full existing CI, including disposable SQL/Storage tests and Linux classifier smoke tests. A manual `workflow_dispatch` run remains available from **Actions → Deploy photo upload backend → Run workflow** and ignores the path filter.
 
 The deployment then pauses new uploads, builds the Node 24 Linux classifier on a GitHub runner, deploys the existing SAM template, reads its Lambda ARN, and checks the dedicated Edge credentials can invoke that function using Lambda DryRun. It sends runtime secrets to Supabase, creates or updates the two named Vault entries, deploys both Edge Functions, probes CORS and authentication, wakes the worker, installs the one-minute Cron schedule, and checks `upload_health()`.
 
@@ -49,7 +49,7 @@ The Supabase configuration helper uses the documented [Management API query endp
 
 ## Run it
 
-Once the workflow and associated code are committed, reviewed and present on `main`, open **Actions → Deploy photo upload backend → Run workflow**, choose `main`, and run it. No remote deployment has been executed while adding these files.
+Once the workflow and associated code are committed, reviewed and present on `main`, a matching backend push starts the deployment automatically. If the workflow needs to be rerun, open **Actions → Deploy photo upload backend → Run workflow**, choose `main`, and run it manually. A required reviewer for the `photo-upload-production` environment must still approve the deployment when configured.
 
 After a green deployment, complete the real HEIC/provider, browser recovery and Storage security release checks in the runbook. Then use trusted Supabase SQL Editor access:
 
