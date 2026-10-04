@@ -110,8 +110,10 @@ export function TravelGlobe({ trips, photos }: Atlas) {
           if (feature.properties.cluster) {
             const coordinates = feature.geometry.coordinates.slice(0, 2) as [number, number];
             const position = map.project(coordinates);
-            const key = `${id}-${photo.id}`;
-            visible.set(key, { coordinates, path: photo.storage_path, title: trip.title, tripId: trip.id, color: tripColor(trip), count: Number(feature.properties.count), x: position.x, y: position.y });
+            const clusterId = Number(feature.properties.cluster_id);
+            const key = `${id}-cluster-${clusterId}`;
+            visibleClusters.set(key, { coordinates, title: trip.title, tripId: trip.id, color: tripColor(trip), count: Number(feature.properties.point_count ?? feature.properties.count), x: position.x, y: position.y, sourceId: id, clusterId });
+            continue;
           }
           if (map.getZoom() < 5) continue;
           const photo = points.photos[Number(feature.properties.representative)];

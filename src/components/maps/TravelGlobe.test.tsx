@@ -11,6 +11,7 @@ const map = vi.hoisted(() => ({
   project: vi.fn(() => ({ x: 120, y: 160 })),
   isStyleLoaded: vi.fn(() => true), getZoom: vi.fn(() => 1.15),
   getLayer: vi.fn(() => ({})), queryRenderedFeatures: vi.fn(() => [] as unknown[]),
+  getSource: vi.fn(), easeTo: vi.fn(),
 }));
 vi.mock('../../lib/groups', () => ({ downloadPhoto: vi.fn(async () => new Blob(['thumbnail'])) }));
 vi.mock('maplibre-gl', () => ({ default: {
@@ -160,10 +161,12 @@ it('keeps failed expansion recoverable and avoids moving after the popup closes'
 });
 
 it('does not place a representative photo thumbnail at an averaged cluster location', () => {
+  map.getZoom.mockReturnValue(5);
   map.queryRenderedFeatures.mockReturnValue([{ geometry: { type: 'Point', coordinates: [2, 48] }, properties: { count: 3, cluster: true, cluster_id: 42, representative: 0 } }]);
   render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   act(() => map.on.mock.calls.find(([event]) => event === 'render')![1]());
   expect(screen.queryByRole('link', { name: /photos. Open trip/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Paris: 3 photos across grouped locations. Explore group' })).toHaveTextContent('3');
 });
 
 it('keeps a newer expansion loading when an older request settles', async () => {
