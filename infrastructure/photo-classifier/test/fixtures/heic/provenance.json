@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/strukturag/libheif",
+  "revision": "413e2a87e6a70b3eccc3a3adc5801179dd2d9e00",
+  "upstreamDirectory": "tests/data",
+  "integrityManifest": "infrastructure/photo-classifier/test/heic-corpus.mjs",
+  "licenseFile": "vendor/libheif-1.23.5/LICENSE",
+  "description": "Unmodified public upstream regression fixtures. No private camera photos. Size and Git blob identity are verified before decoding; rotation is generated in memory.",
+  "files": [
+    "rainbow-451x461.heic",
+    "with-alpha-512x512.heic",
+    "clap_cropped.heic",
+    "conformance_window_padding.heic"
+  ]
+}

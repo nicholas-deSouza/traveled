@@ -20,6 +20,16 @@ test('fixture identity is verified before decoding', () => {
   assert.throws(() => verifyFixture(Buffer.from('changed'), fixture), /blob identity/);
   assert.throws(() => verifyFixture(Buffer.alloc(0), fixture), /byte length/);
 });
+test('checked-in public corpus is complete and hash-pinned without network requests', async () => {
+  const directory = fileURLToPath(new URL('./fixtures/heic/', import.meta.url));
+  for (const entry of corpus) {
+    const input = await loadFixture(entry, directory, () => assert.fail('bundled corpus must not fetch'));
+    assert.equal(input.length, entry.size);
+  }
+  const provenance = JSON.parse(await readFile(new URL('./fixtures/heic/provenance.json', import.meta.url), 'utf8'));
+  assert.equal(provenance.revision, '413e2a87e6a70b3eccc3a3adc5801179dd2d9e00');
+  assert.deepEqual(provenance.files, corpus.map(entry => entry.name));
+});
 test('offline corpus fails closed on missing files and preserves online identity checks', async () => {
   await assert.rejects(loadFixture(fixture, '/nonexistent/traveled-heic-corpus'), /ENOENT/);
   assert.deepEqual(await loadFixture(fixture, undefined, async () => new Response(bytes)), bytes);

@@ -123,4 +123,4 @@ jobs:
             -v "$PWD:/workspace:ro" \
             -v "$PWD/infrastructure/photo-classifier/dist/lambda:/artifact:ro" \
             public.ecr.aws/sam/build-nodejs24.x \
-            /workspace/infrastructure/photo-classifier/test/heic-corpus.mjs /artifact --require-crop
+            /workspace/infrastructure/photo-classifier/test/heic-corpus.mjs /artifact --require-crop --fixtures /workspace/infrastructure/photo-classifier/test/fixtures/heic

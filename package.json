@@ -15,8 +15,8 @@
     "test:watch": "vitest",
     "test:scripts": "node --test scripts/test-*.mjs .github/scripts/*.test.mjs",
     "test:classifier": "npm test --prefix infrastructure/photo-classifier",
-    "test:heic:corpus": "node infrastructure/photo-classifier/test/heic-corpus.mjs --require-crop",
-    "test:heic:browser": "node infrastructure/photo-classifier/test/heic-corpus.mjs --require-crop --browser-bundle",
+    "test:heic:corpus": "node infrastructure/photo-classifier/test/heic-corpus.mjs --require-crop --fixtures infrastructure/photo-classifier/test/fixtures/heic",
+    "test:heic:browser": "node infrastructure/photo-classifier/test/heic-corpus.mjs --require-crop --browser-bundle --fixtures infrastructure/photo-classifier/test/fixtures/heic",
     "test:upload:browser": "node scripts/check-upload-browser.mjs"
   },
   "dependencies": {
