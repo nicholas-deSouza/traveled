@@ -99,6 +99,12 @@ Health counts are aggregate observations; they do not prove provider approval or
 
 Retain links to successful CI checks for the tested revision. Linux packaging alone initializes WASM but does not decode real HEIC: after building the artifact, run `node infrastructure/photo-classifier/test/artifact-smoke.mjs ARTIFACT_DIR HEIC_FIXTURE` **inside the Linux x86_64 Node24 environment**, repeating for reviewed still/orientation/auxiliary fixtures. Inspect the reference scene/orientation; the existing smoke's dimension bounds are not a visual golden-image comparison.
 
+The artifact CI runs `test/heic-corpus.mjs` against pinned public still/alpha/rotation/crop fixtures using the reviewed, vendored libheif 1.23.5 factory and WASM. Every selected artifact job requires crop compatibility, not just manual runs. Run `node infrastructure/photo-classifier/test/heic-corpus.mjs ARTIFACT_DIR --require-crop` in Linux Node24 for the same strict gate. Offline checks may add `--fixtures REVIEWED_CORPUS_DIR`; every fixture still has to match its pinned size and Git blob identity. The browser factory can also be checked with `--browser-bundle`.
+
+Account changes additionally require `supabase/tests/account_security.sql` and `scripts/check-account-security.mjs` against disposable Supabase. The HTTP script refuses hosted origins; hosted email delivery and recovery checks remain separate operator-controlled tests.
+
+For an explicitly approved hosted signup-hook check, open `/scripts/account-hook-browser-check.html` through the local development server and run its password-free synthetic OTP probe. Only the exact custom hook rejection counts as invocation proof. This is an operator test page, not part of the production build. Clear dismissal metadata is durable and account-scoped; logout releases private in-memory bytes and closes the account store without erasing dismissed outcomes.
+
 ## 4. Accept or stop the release
 
 - Record each case PASS, FAIL, BLOCKED, or NOT RUN; automated coverage is not a live/device pass.

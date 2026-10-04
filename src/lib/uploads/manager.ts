@@ -8,7 +8,7 @@ export function createUploadManager(userId: string, dependencies: Partial<Manage
   let running: RunningManager | undefined;
   let unsubscribe: (() => void) | undefined;
   let store: MetadataStore | undefined = dependencies.store;
-  let discardTimer: ReturnType<typeof setTimeout> | undefined;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const compatible = dependencies.compatible ?? isUploadCompatible();
   let snapshot: UploadSnapshot = { items: [], compatible, error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and WebP canvas support. Use a current supported browser.' };
@@ -17,7 +17,7 @@ export function createUploadManager(userId: string, dependencies: Partial<Manage
   return {
     start() {
       if (running) return;
-      if (discardTimer !== undefined) { clearTimeout(discardTimer); discardTimer = undefined; }
+      if (closeTimer !== undefined) { clearTimeout(closeTimer); closeTimer = undefined; }
       if (!store && compatible) store = createMetadataStore(userId);
       running = createRunningUploadManager(userId, { ...dependencies, ...(store ? { store } : {}) });
       snapshot = running.getSnapshot();
@@ -29,18 +29,19 @@ export function createUploadManager(userId: string, dependencies: Partial<Manage
     enqueue: (tripId, files) => active().enqueue(tripId, files),
     retry: (id) => active().retry(id),
     cancel: (id) => active().cancel(id),
+    clearFinished: () => active().clearFinished(),
     reselect: (id, file) => active().reselect(id, file),
     stop() {
       unsubscribe?.(); unsubscribe = undefined;
       if (!running) return;
-      running.stop(false); running = undefined;
-      // Cancel bytes immediately. Deferring only metadata discard lets React's
-      // synchronous StrictMode cleanup/restart preserve pending admission IDs.
+      running.stop(); running = undefined;
+      // Release bytes immediately and close the account's store after StrictMode's
+      // synchronous restart window. Dismissal and recovery metadata survive logout.
       const stoppedStore = store;
-      discardTimer = setTimeout(() => {
-        discardTimer = undefined;
-        store = undefined;
-        if (stoppedStore) void stoppedStore.clear().catch(() => undefined).finally(() => stoppedStore.close?.());
+      closeTimer = setTimeout(() => {
+        closeTimer = undefined;
+        store = dependencies.store;
+        stoppedStore?.close?.();
       }, 0);
       snapshot = { ...snapshot, items: [] }; emit();
     },

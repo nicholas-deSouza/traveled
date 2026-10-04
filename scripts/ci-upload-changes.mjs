@@ -19,6 +19,14 @@ const sharedFiles = new Set([
   'pnpm-lock.yaml',
 ]);
 const databaseFiles = new Set([
+  'scripts/account-hook-probe.mjs',
+  'scripts/account-hook-browser-check.html',
+  'scripts/test-account-hook-probe.mjs',
+  'scripts/check-account-security.mjs',
+  'scripts/test-account-security.mjs',
+  'scripts/test-account-security-ci.mjs',
+  'src/lib/authEmail.ts',
+  'src/lib/authEmail.test.ts',
   'scripts/prepare-fresh-schema.mjs',
   'scripts/check-upload-storage.mjs',
   'scripts/test-upload-server.mjs',
@@ -32,10 +40,11 @@ export function jobsForPaths(paths) {
     if (sharedFiles.has(path)) return allJobs();
     // Documentation alone doesn't change the executable validation inputs.
     if (path.endsWith('.md')) continue;
+    if (path.startsWith('vendor/libheif-')) return allJobs();
     if (path.startsWith('supabase/') || path.startsWith('src/lib/uploads/') || databaseFiles.has(path)) {
       jobs.upload_database = true;
     }
-    if (path.startsWith('infrastructure/photo-classifier/')) jobs.classifier_artifact = true;
+    if (path.startsWith('infrastructure/photo-classifier/') || path === 'scripts/test-heic-release-gate.mjs') jobs.classifier_artifact = true;
   }
   return jobs;
 }

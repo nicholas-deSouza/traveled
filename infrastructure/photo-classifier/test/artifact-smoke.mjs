@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { resolve, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createDiagnostics, fail, isMain, runScript } from '../../../scripts/script-diagnostics.mjs';
+import { vendorSource, verifyVendor } from '../stage-vendor.mjs';
 
 export async function smokeArtifact(artifact, fixture, diagnostics = createDiagnostics('classifier-artifact-smoke')) {
 let stage = 'load-codecs';
@@ -41,9 +42,11 @@ if (fixture) {
 } else {
   mark('heic-wasm');
   // Initialize the shipped WASM even without a HEIC corpus, exercising packaging and dynamic loading.
-  const root = require.resolve('libheif-js/package.json').replace(/package\.json$/,'');
-  const factory = require(join(root,'libheif-wasm/libheif.js'));
-  const lib = await factory({wasmBinary:await readFile(join(root,'libheif-wasm/libheif.wasm'))});
+  const root = artifact ? join(resolve(artifact), 'vendor/libheif-1.23.5') : vendorSource;
+  await verifyVendor(root);
+  const factory = require(join(root,'libheif.cjs'));
+  const lib = await factory({wasmBinary:await readFile(join(root,'libheif.wasm'))});
+  assert.equal(lib.heif_get_version(), '1.23.5');
   assert.equal(typeof lib.HeifDecoder,'function');
   assert.deepEqual(new lib.HeifDecoder().decode(new Uint8Array([1,2,3])),[]);
 }

@@ -31,3 +31,16 @@ it('retries failed loads and shows owner controls', async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
   expect(await screen.findByRole('button', { name: 'Create invite link' })).toBeInTheDocument();
 });
+it('renders current peer names, own identity, roles and missing-name fallback', async () => {
+  vi.mocked(loadGroup).mockResolvedValue({ group: { id: 'friends', name: 'Friends', created_by: 'owner' }, trips: [], members: [
+    { user_id: 'owner', role: 'owner', profiles: { display_name: 'Alex' } },
+    { user_id: 'member', role: 'member', profiles: { display_name: 'Sam' } },
+    { user_id: 'unnamed', role: 'member', profiles: null },
+  ] });
+  mount();
+  expect(await screen.findByText('Alex')).toBeInTheDocument();
+  expect(screen.getByText('Sam (you)')).toBeInTheDocument();
+  expect(screen.getByText('Traveler')).toBeInTheDocument();
+  expect(screen.getByText('owner')).toBeInTheDocument();
+  expect(screen.getAllByText('member')).toHaveLength(2);
+});

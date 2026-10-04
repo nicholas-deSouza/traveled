@@ -80,7 +80,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
             if (!photo) continue;
             const coordinates = feature.geometry.coordinates.slice(0, 2) as [number, number];
             const position = map.project(coordinates);
-            const key = `${id}-${feature.properties.cluster ? `cluster-${feature.properties.cluster_id}` : photo.id}`;
+            const key = `${id}-${photo.id}`;
             visible.set(key, { coordinates, path: photo.storage_path, title: trip.title, tripId: trip.id, color: tripColor(trip), count: Number(feature.properties.count), x: position.x, y: position.y });
           }
         }
@@ -152,9 +152,9 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     map.on("style.load", () => {
       map.setProjection({ type: "globe" });
       for (const { trip, id, points } of datasets) {
-        map.addSource(id, { type: 'geojson', data: points.data, cluster: true, clusterRadius: 80, clusterMaxZoom: 14,
-          clusterProperties: { count: ['+', ['get', 'count']], representative: ['min', ['get', 'representative']] },
-        });
+        // Screen-space clustering can merge different cities into a misleading
+        // midpoint. photoPoints already groups only identical coordinates.
+        map.addSource(id, { type: 'geojson', data: points.data, cluster: false });
         map.addLayer({ id, type: 'circle', source: id, paint: {
           'circle-radius': 7, 'circle-color': tripColor(trip),
           'circle-stroke-color': '#fff', 'circle-stroke-width': 2,

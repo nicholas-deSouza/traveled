@@ -1,5 +1,9 @@
 project_id = "traveled"
 
+[auth.hook.before_user_created]
+enabled = true
+uri = "pg-functions://postgres/auth_private/before_user_created"
+
 [functions.photo-upload]
 verify_jwt = false # Handler validates the JWT with Auth /user on every request.
 

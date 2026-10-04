@@ -174,6 +174,15 @@ begin;
                     auth.uid()
                 )
                 returning id as member_trip \gset
+            -- Clients cannot publish gallery files or metadata, even for their
+            -- own trip. The trusted server publishes the fixture below.
+            select
+                pg_temp.denied(format('insert into storage.objects(bucket_id,name,owner_id) values (''trip-photos'', %L, auth.uid()::text)', :'group_a' || '/' || :'member_trip' || '/photo.jpg'), '42501');
+            select
+                pg_temp.denied(format('insert into public.photos(trip_id,uploaded_by,storage_path) values (%L, auth.uid(), %L)', :'member_trip', :'group_a' || '/' || :'member_trip' || '/photo.jpg'), '42501');
+            reset role;
+            -- Privileged server-published (grandfathered) gallery fixture.
+            -- The uploader remains user 2; reads must still enforce membership.
             insert into storage.objects
                 (
                     bucket_id,
@@ -200,13 +209,24 @@ begin;
                     :'group_a' || '/' || :'member_trip' || '/photo.jpg'
                 )
             ;
+            set local role authenticated;
             select
                 pg_temp.assert(
                 (
                     select
                         count(*) = 1
                     from
-                        public.photos), 'member uploads and reads photo metadata');
+                        public.photos), 'member reads server-published photo metadata');
+            select
+                pg_temp.assert(
+                (
+                    select
+                        count(*) = 1
+                    from
+                        storage.objects), 'member reads server-published photo file');
+            -- A real gallery object does not restore client publication rights.
+            select
+                pg_temp.denied(format('insert into public.photos(trip_id,uploaded_by,storage_path) values (%L, auth.uid(), %L)', :'member_trip', :'group_a' || '/' || :'member_trip' || '/photo.jpg'), '42501');
             select
                 pg_temp.denied(format('insert into public.photos(trip_id,uploaded_by,storage_path) values (%L, auth.uid(), %L)', :'trip_a', :'group_a' || '/' || :'member_trip' || '/photo.jpg'), '42501');
             select
@@ -283,7 +303,8 @@ begin;
             select
                 token as expired_token
             from
-                public.create_group_invitation(:'group_a') \gset reset role;
+                public.create_group_invitation(:'group_a') \gset
+            reset role;
             update
                 public.group_invitations
             set

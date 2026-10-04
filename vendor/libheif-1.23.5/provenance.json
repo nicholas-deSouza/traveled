@@ -1,0 +1,28 @@
+{
+  "version": "1.23.5",
+  "repository": "https://github.com/catdad-experiments/libheif-emscripten",
+  "commit": "5c8968a44e9c68ae677e24790d77d001ed7fe7cc",
+  "release": "https://github.com/catdad-experiments/libheif-emscripten/releases/tag/v1.23.5",
+  "artifact": "https://github.com/catdad-experiments/libheif-emscripten/releases/download/v1.23.5/libheif.tar.gz",
+  "archiveSha256": "0fa8629a75344389f0da842f659cc952ecaa39cde400eed42b80e4a82a3af778",
+  "license": "LGPL-3.0",
+  "files": {
+    "libheif.cjs": {
+      "archivePath": "libheif-wasm/libheif.js",
+      "sha256": "55983f07e1799a95c4945a3d2bfb5d22d3fff7d40cbd218ee91104593e329df0"
+    },
+    "libheif-browser.mjs": {
+      "derivedFrom": "libheif.cjs",
+      "adaptation": "Append a native ES module default export; upstream factory bytes are unchanged.",
+      "sha256": "5d81c88c9f4fa9b229a6787ca707a440ec0b832360e1cd00baacd4ca901b3ac7"
+    },
+    "libheif.wasm": {
+      "archivePath": "libheif-wasm/libheif.wasm",
+      "sha256": "184d3d20f8323877f13e9f5254f9c6a0ce272c9a3a2f823b0b2bcd2ee9f73f80"
+    },
+    "LICENSE": {
+      "archivePath": "libheif-wasm/LICENSE",
+      "sha256": "fa81ce652315b013359d6e8e4744335f31a50c7c192907176d3632f78a3b4596"
+    }
+  }
+}

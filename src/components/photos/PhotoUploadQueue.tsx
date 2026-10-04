@@ -21,6 +21,7 @@ export function PhotoUploadQueue() {
   const [busy, setBusy] = useState(false);
   const visibleItems = snapshot.items.filter(item => !item.outcome || !['published', 'canceled', 'deleted'].includes(item.outcome));
   const unfinished = snapshot.items.filter(item => !item.outcome);
+  const finished = visibleItems.filter(item => item.outcome);
   const failed = unfinished.filter(item => item.local_status === 'failed' || item.pause_reason === 'technical');
   useEffect(() => {
     if (!visibleItems.length && error) setError('');
@@ -39,6 +40,7 @@ export function PhotoUploadQueue() {
     {visibleItems.length > 0 && <>
       <p role="status" className="mt-2 text-sm">{unfinished.length} awaiting completion. Photos appear after both verification checks.</p>
       <div className="my-3 flex flex-wrap gap-2">
+        {finished.length > 0 && <Button variant="outline" disabled={busy} onClick={() => void run(() => manager.clearFinished())}>Clear</Button>}
         <Button variant="outline" disabled={busy || !failed.length} onClick={() => void run(() => Promise.all(failed.map(item => manager.retry(item.id))))}>Retry failed</Button>
         <Button variant="outline" disabled={busy || !unfinished.length} onClick={() => void run(() => Promise.all(unfinished.map(item => manager.cancel(item.id))))}>Cancel remaining</Button>
       </div>

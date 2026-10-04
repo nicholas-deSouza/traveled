@@ -20,8 +20,9 @@ export type UploadManager = {
   enqueue(tripId: string, files: File[]): Promise<void>;
   retry(id: string): Promise<void>;
   cancel(id: string): Promise<void>;
+  clearFinished(): Promise<void>;
   reselect(id: string, file: File): Promise<void>;
-  stop(clearMetadata?: boolean): void;
+  stop(): void;
 };
 export type ManagerDependencies = {
   api: PhotoUploadApi; store: MetadataStore; locks: LockManager; channel: BroadcastChannel;
@@ -62,10 +63,11 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   let snapshot: UploadSnapshot = { items: [], error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and WebP canvas support. Use a current supported browser.', compatible };
   const emit = () => {
     if (lifetime.signal.aborted) return;
-    snapshot = { ...snapshot, items: [...items.values()] };
+    snapshot = { ...snapshot, items: [...items.values()].filter(item => !item.outcome || !metadata.get(item.id)?.dismissed) };
     for (const listener of listeners) listener();
   };
   const local = (id: string, status: UploadItem['local_status'], error: string | null = null, failure?: FailureContext) => {
+    if (lifetime.signal.aborted) return;
     const item = items.get(id);
     if (status === 'failed' && failure && (item?.generation !== failure.generation || item.phase !== failure.stage)) return;
     if (item) { items.set(id, { ...item, local_status: status, local_error: error }); emit(); }
@@ -84,6 +86,7 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
       submission, admissionRequest: previous?.admissionRequest ?? submission.id,
       candidateRequest: previous?.candidateRequest ?? null,
       originalAcknowledged: previous?.originalAcknowledged ?? submission.phase !== 'original_upload',
+      dismissed: previous?.dismissed,
       localFailed: previous?.localFailed && (previous.localFailureGeneration === undefined || previous.localFailureGeneration === submission.generation)
         && (previous.localFailureStage === undefined || previous.localFailureStage === submission.phase),
       localError: previous?.localError, localFailureGeneration: previous?.localFailureGeneration, localFailureStage: previous?.localFailureStage,
@@ -99,9 +102,11 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
     emit();
   }
   async function request(body: UploadRequest) {
+    if (lifetime.signal.aborted) throw new StoppedUpload();
     const response = await deps.api.request(body);
     if (lifetime.signal.aborted) throw new StoppedUpload();
     if (response.submission) await save(response.submission);
+    if (lifetime.signal.aborted) throw new StoppedUpload();
     if (response.target && 'id' in body) targets.set(body.id, response.target);
     return response;
   }
@@ -283,12 +288,15 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
     }
   }
   async function refresh() {
+    if (lifetime.signal.aborted) throw new StoppedUpload();
     for (const value of await deps.store.list()) {
+      if (lifetime.signal.aborted) throw new StoppedUpload();
       const current = metadata.get(value.submission.id);
       if (value.submission.user_id === userId) {
         if (current) {
           current.localFailed = value.localFailed; current.localError = value.localError;
           current.localFailureGeneration = value.localFailureGeneration; current.localFailureStage = value.localFailureStage;
+          current.dismissed = value.dismissed;
         }
         else metadata.set(value.submission.id, value);
       }
@@ -303,6 +311,7 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
         try {
           await waitOnline(lifetime.signal);
           const ids = await refresh();
+          if (lifetime.signal.aborted) return;
           // Grants contain identifiers only; each originating tab keeps its own File and does local work.
           deps.channel.postMessage({ type: 'grant', ids }); dispatch(ids);
           if (snapshot.error) { snapshot = { ...snapshot, error: null }; emit(); }
@@ -328,10 +337,12 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
       }
     }
     for (const value of await deps.store.list()) {
+      if (lifetime.signal.aborted) return;
       if (value.submission.user_id === userId) { metadata.set(value.submission.id, value); await save(value.submission); }
     }
     try { await refresh(); }
     catch (error) { snapshot = { ...snapshot, error: error instanceof Error ? error.message : 'Upload recovery failed.' }; emit(); }
+    if (lifetime.signal.aborted) return;
     deps.channel.onmessage = (event: MessageEvent<{ type?: string; ids?: string[] }>) => {
       if (event.data.type === 'grant' && Array.isArray(event.data.ids)) {
         const ids = event.data.ids.filter((id) => typeof id === 'string');
@@ -343,6 +354,18 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   return {
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     getSnapshot: () => snapshot,
+    async clearFinished() {
+      for (const item of snapshot.items) {
+        if (!item.outcome || ['published', 'canceled', 'deleted'].includes(item.outcome)) continue;
+        const value = metadata.get(item.id);
+        if (!value) continue;
+        const dismissed = { ...value, dismissed: true };
+        await deps.store.put(dismissed);
+        if (lifetime.signal.aborted) return;
+        metadata.set(item.id, dismissed);
+        emit();
+      }
+    },
     async enqueue(tripId, selected) {
       if (!compatible) throw new Error(snapshot.error!);
       await ready;
@@ -431,11 +454,10 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
         throw new Error('Choose the same original photo to resume this submission.');
       files.set(id, file); local(id, 'waiting');
     },
-    stop(clearMetadata = true) {
+    stop() {
       lifetime.abort(); for (const controller of running.values()) controller.abort();
       files.clear(); targets.clear(); checked.clear(); items.clear(); metadata.clear(); listeners.clear(); deps.channel.close();
-      // Sign-out clears only this account's metadata. Server-owned stages remain durable.
-      if (clearMetadata) void deps.store.clear().catch(() => undefined).finally(() => deps.store.close?.());
+      snapshot = { ...snapshot, items: [] };
     },
   };
   function activeCount() { return [...items.values()].filter((item) => !item.outcome && item.local_status !== 'failed' && item.pause_reason !== 'technical').length; }

@@ -2,6 +2,14 @@
 create role anon nologin;
 create role authenticated nologin;
 create role service_role nologin bypassrls;
+-- Real Supabase provides this role for SQL Auth hooks; bare Postgres does not.
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'supabase_auth_admin') then
+    create role supabase_auth_admin nologin;
+  end if;
+end;
+$$;
 create schema auth;
 create schema storage;
 create table auth.users (id uuid primary key, raw_user_meta_data jsonb default '{}');

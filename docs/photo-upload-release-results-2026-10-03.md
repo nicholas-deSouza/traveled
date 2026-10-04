@@ -119,3 +119,74 @@ Final local validation passed as above. The unsupported-source fix and HEIC top-
 Initial live screenshot `photo-upload-live-check.jpg` shows the first four generated images. Later screenshots and trusted SQL results above supersede the initial unverified health/cleanup/provider status.
 
 Admission remains enabled in the final trusted snapshot; it was not paused by the agent. Window closure requires an explicit operator decision. Retain the published photos, group and trip for inspection. The unsupported pending submission was explicitly canceled, invoking the existing cleanup workflow; no published photos, groups, trips, or local files were deleted. Do not treat the current enabled state or these partial passes as general release approval while required checks remain unresolved.
+
+## Follow-up implementation — 2026-10-04
+
+Release acceptance remains **PENDING**. The operator explicitly chose to keep uploads enabled during this work. No hosted admission, Auth configuration, schema, account, photo, subscription or deployment was changed. Current hosted health and admission state were not available to inspect.
+
+### Revision and historical evidence
+
+- This checkout, local `main`, and the existing frontend's checkout resolve to `def6e06c7e555d9307645eb23ed4a459cccbdddf`. New work below is uncommitted and is not included in that revision.
+- GitHub confirms [PR 21](https://github.com/nicholas-deSouza/traveled/pull/21) merged. Its reviewed head `ec0b9b9c2f901f7e72c1c538375cf0f8ac2bb946` passed [CI run 80](https://github.com/nicholas-deSouza/traveled/actions/runs/37161409875): tests/lint/build, disposable SQL/real Storage gates, and Linux native packaging. The packaging job did not decode the new real HEIC corpus. No workflow runs were returned for merge revision `def6e06`; do not assign the head's evidence to a different revision.
+- The later “Verify HEIC upload release flow” chat records a successful fresh-tab retry: both approvals, GPS acknowledgement, non-null gallery GPS, settled queue, no pending cleanup and healthy reservation/job counts. This supersedes that chat's initial null-GPS result. It is historical live evidence, not a new hosted check performed today. Earlier statements here that the metadata fix was unmerged are historical; its implementation is now on local `main`.
+- The queue-hiding change and classifier dependency installs in CI/Greploop are already present. Their local regressions pass.
+
+### Implemented locally
+
+- New account-security migration replaces global authenticated profile visibility with self/current-shared-group visibility. Its private helper derives the caller from Auth, qualifies its references, fixes its search path and restricts execution. Own-profile mutations and member-name joins remain supported.
+- The private invoker signup hook rejects malformed, non-ASCII/emoji and oversized email identifiers during creation. Valid plus addressing and SQL-word-containing emails remain allowed. Local config enables it; hosted activation still requires applying the migration and selecting the hook. Login, existing email changes, display names and password characters are outside this hook's policy.
+- New SQL assertions cover enumeration, roster joins, self/peer mutations, invitations, multiple shared groups, membership removal, historical trip creation, null identity, anonymous access, helper ACLs and signup policy execution as `supabase_auth_admin`.
+- Legacy group assertions now model trusted server publication rather than obsolete client gallery writes. Database CI executes group, trip-color, account-security and upload/queue suites, then a localhost-only account HTTP gate and existing Storage gate. HTTP tests use real user tokens for profile reads and the application's exact PostgREST roster embed. Invalid direct signup and unrelated service failures cannot count as enforcement passes.
+- Public HEIC corpus harness pins upstream revision/blob identities and checks still decoding, auxiliary alpha, crop/padding dimensions, metadata stripping and pixel rotation. Browser worker tests add pixel-limit and decoder-context cleanup coverage.
+- Ordinary artifact CI exercises the supported corpus and reports the pinned 1.23.2 crop incompatibility as BLOCKED. Manual CI release validation additionally passes `--require-crop`, making crop failure fatal. A green ordinary run is not full HEIC release acceptance.
+
+### Checks performed
+
+| Check | Result and limitation |
+| --- | --- |
+| `pnpm test` | PASS: 199 Vitest + 117 Node script + 25 classifier tests = 341; component/test pairing passes |
+| `pnpm lint` | PASS |
+| TypeScript and production bundle | PASS with temporary type caches and Vite `envDir:false`, no config-file loading, fresh temporary output, and actual worker/WASM assets. Normal build initially failed on unavailable dependency links; equivalent build avoids reading `.env` |
+| Classifier build/native smoke | PASS on macOS Node25; synthetic JPEG/PNG/WebP and WASM initialization only |
+| New SQL and account HTTP integration | BLOCKED locally; assertions are executable in disposable Supabase CI but not run here |
+| Real HEIC corpus | NOT RUN locally; shell downloads fail DNS, GitHub connector binary reads fail UTF-8 decoding |
+| Isolated browser checker | Import transforms PASS; actual browser cases BLOCKED by localhost bind EPERM, including escalation |
+| Current hosted/device/provider checks | NOT RUN; no connected Supabase session, valid signed-in app session, device set or provider test facility. Browser bridge reaches the app but its atlas/upload refresh reports `JWT issued at future` |
+
+Dependency installation from the root lockfile failed DNS even with escalation. Existing local dependencies were reused without changing lockfiles; classifier `npm ci` succeeded from available packages. Supabase CLI installation also failed DNS. Migration tooling was unavailable, so the new filename uses the current UTC timestamp; the migration has not been applied. Postgres.app `initdb` failed `shmget` with OS permissions both normally and escalated. Docker is unavailable. A fresh independent reviewer found a dollar-quote delimiter collision in the hook; it was corrected before final validation. Source review is not a substitute for database execution, so the privacy finding remains verification-blocked.
+
+### Remaining release gates
+
+| Cases | Work still required |
+| --- | --- |
+| Account security | Execute new SQL/HTTP gates; apply migration and activate hosted hook; verify confirmation, correct/wrong password login, recovery, expired/reused links, redirects, rate limits, configured password protection and account switching with disposable accounts |
+| H01–H07, I01–I04 | Retain final-revision live format/output/GPS evidence; complete mirrored/oriented/auxiliary/multiple-photo and unsupported/animated corpus cases. Install and verify a pinned corrected decoder in browser and classifier without relaxing limits |
+| R01–R05, C01–C06 | Complete precise live interruption, tab-close, offline/reselection, cancellation, competing-tab/manual-retry and cross-account stages; deterministic unit coverage is not a live pass |
+| S01–S04, O01–O04 | Run new disposable SQL/real API checks and hosted A/B/C isolation; verify physical temporary-object removal and reservations against a fresh baseline. Capacity, expiry, races and retry exhaustion remain isolated tests |
+| M01–M07 | Fresh deployed-model/request audit, representative moderation corpus and actual quota behavior through an approved facility or natural exhaustion; do not manufacture exhaustion with repeated uploads |
+| H03 / Linux | Decode the reviewed corpus in the packaged Linux x86_64 Node24 artifact, including strict `--require-crop`; packaging initialization alone is insufficient |
+| B01 | Execute isolated browser cases and current Chrome/Firefox/Safari, iPhone/iPad/Android and constrained-device checks |
+| Acceptance | Retain successful CI/deployment links for the final tested revision; inspect fresh health and sustained cleanup observations. Keep admission enabled per operator choice; do not claim general release acceptance until every required gate passes |
+
+Upstream publishes [libheif-emscripten 1.23.5 builds](https://github.com/catdad-experiments/libheif-emscripten/releases/tag/v1.23.5), while the npm `libheif-js` package inspected remains at 1.23.2. Fetching a corrected build or rebuilding it locally was not feasible here. No decoder dependency, runtime behavior, security limit or stored GPS was changed.
+
+A final browser-bridge check reached the existing signed-in frontend despite shell HTTP failures. Its atlas and upload refresh show `JWT issued at future`; no token contents were read and no sign-out or account change was performed. The panel correctly keeps unsupported-file failures visible with zero awaiting completion. The official 1.23.5 release asset list loaded, but its archive download timed out; no downloaded build was available to verify or install. The app session requires reauthentication/clock diagnosis before current live gates can run. Earlier “no browser session” observations describe the initial inventory, not this later navigation.
+
+## Approved fixes and current hosted checks — 2026-10-04
+
+This section supersedes earlier unavailable-session and decoder-download observations. The user restarted the project and explicitly approved hosted security changes, disposable test data, and a review-branch commit/push. The listening Vite process on port 5174 has this worktree as its working directory. Release acceptance remains pending broader device/live-stage and final-revision CI/deployment evidence.
+
+- Clear now preserves account-scoped dismissal/recovery metadata across delayed logout/login, while releasing bytes, aborting work, closing the store and replacing the provider on account changes. Tests cover delayed login, account switch/return and late responses. Live Clear followed by reload kept the old outcomes hidden; this is not a live logout/login pass.
+- Map regression coverage exercises rendered features, overlapping thumbnails, duplicate tile features and zoom-out URL cleanup. The actual browser showed independent SF/LA dots at regional zoom and two separate thumbnail links at close zoom.
+- All eight generated-image worker checks passed through the existing Vite server. The separate checker server still cannot bind a port; using the already-running server avoids that environment limitation.
+- The official 1.23.5 archive downloaded through the browser, and its SHA-256 matched `0fa8629a75344389f0da842f659cc952ecaa39cde400eed42b80e4a82a3af778`. The fix uses reviewed vendored factory/WASM/license/provenance rather than the incompatible npm 1.23.2 build. Ordinary Linux artifact CI is strict, not manual-only.
+- A rollback-only hosted candidate transaction verified self/peer isolation, roster joins, self update, denied peer update, membership revocation, null identity, ACLs and hook function behavior. Hosted `postgres` cannot impersonate `supabase_auth_admin`; function behavior was tested as owner, with separate ACL and actual Auth invocation checks. No fixture users remain.
+- The approved privacy migration was committed through SQL Editor: RLS remains enabled; unrestricted authenticated profile reads are replaced by self/current-group-peer reads. The private signup hook was enabled in Authentication → Hooks. A password-free synthetic OTP probe returned the exact custom rejection, proving hosted Auth invoked the hook. This project has no `supabase_migrations.schema_migrations` table; the manual application was not recorded as a fabricated migration baseline.
+- A mixed synthetic JPEG/text live batch rejected text locally and published exactly one JPEG. Refresh was exercised at the displayed publication stage. At `2026-10-04T22:07:58Z`, the test trip had 16 photos (15 before this batch), the latest submission had both approvals and one gallery row, and original/candidate objects were marked removed with zero corresponding Storage metadata rows. This is not an independent physical-object download/404 proof.
+- Post-rollout health: queues/cron/pg_net/scheduled true; unfinished, failed jobs, quota pauses, expired leases, cleanup pending, oldest ready job and reservations all zero. Admission remains enabled per the user's existing choice. The application roster still displayed the owner name/role after the privacy change.
+
+The published synthetic JPEG remains available for inspection. No gallery photos or other existing application records were deleted. Cross-account HTTP/Storage gates, physical cleanup proof, all interruption stages, actual phone/tablet/Firefox/Safari and constrained-device testing still require their named environments; deterministic coverage and a point-in-time health snapshot do not replace those checks.
+
+Final integrated local validation on 2026-10-04 passed `pnpm test`, `pnpm lint`, both TypeScript projects, and an equivalent production Vite build with environment-file loading disabled. The regular `pnpm build` was not used because this task must not read `.env` files. The build retains the existing large-chunk warning.
+
+The complete content-addressed upstream HEIC corpus passed with libheif 1.23.5 in both classifier WASM and the browser-worker realm: still rainbow, auxiliary alpha, clean-aperture crop, 1×1 conformance-window padding, and a quarter-turn rotation pixel comparison. The actual browser file chooser also decoded both public crop and padding fixtures; all ten accumulated real-worker checks passed. Linux Node24 artifact and disposable Supabase integration results remain CI gates, not local claims.
