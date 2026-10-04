@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/deploy-photo-upload.yml'
       - 'infrastructure/photo-classifier/src/**'
+      - 'infrastructure/photo-classifier/template.yaml'
       - 'infrastructure/photo-classifier/build-artifact.mjs'
       - 'infrastructure/photo-classifier/package.json'
       - 'infrastructure/photo-classifier/package-lock.json'
