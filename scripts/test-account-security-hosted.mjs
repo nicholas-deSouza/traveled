@@ -25,8 +25,6 @@ update pg_temp.account_security_fixture as fixture set invitation =
   (select created.token from public.create_group_invitation(fixture.first_group) as created)
   where fixture.singleton;
 select pg_temp.assert((select invitation ~ '^[a-f0-9]{64}$' from pg_temp.account_security_fixture where singleton), 'invitation RPC returns one usable text token');`);
-  expected = expected.replace('set local role supabase_auth_admin;', '-- Still the function owner from RESET ROLE above, not the Auth runtime role.');
-  expected = expected.replace("'Auth can invoke private hook'", "'Auth role has hook EXECUTE and schema USAGE grants'");
   for (const name of ['first_group', 'second_group', 'invitation']) {
     expected = expected.replaceAll(`:'${name}'`, `(select ${name} from pg_temp.account_security_fixture where singleton)`);
   }
@@ -35,13 +33,16 @@ select pg_temp.assert((select invitation ~ '^[a-f0-9]{64}$' from pg_temp.account
   assert.equal(actual, expected);
 });
 
-test('hosted hook checks use owner execution and ACL evidence without Auth impersonation', () => {
-  assert.doesNotMatch(hosted, /set\s+(?:local\s+)?role\s+supabase_auth_admin/i);
-  assert.match(source, /set local role supabase_auth_admin;/);
-  const hookChecks = hosted.slice(hosted.indexOf('-- Still the function owner'));
-  assert.doesNotMatch(hookChecks, /^set\s+(?:local\s+)?role/im);
-  assert.match(hosted, /has_function_privilege\('supabase_auth_admin', 'auth_private\.before_user_created\(jsonb\)', 'EXECUTE'\)/);
-  assert.match(hosted, /has_schema_privilege\('supabase_auth_admin', 'auth_private', 'USAGE'\)/);
+test('both SQL suites use owner execution and ACL evidence without Auth impersonation', () => {
+  for (const sql of [source, hosted]) {
+    assert.doesNotMatch(sql, /set\s+(?:local\s+)?role\s+supabase_auth_admin/i);
+    assert.match(sql, /-- Still the function owner/);
+    const hookChecks = sql.slice(sql.indexOf('-- Still the function owner'));
+    assert.doesNotMatch(hookChecks, /^set\s+(?:local\s+)?role/im);
+    assert.match(sql, /has_function_privilege\('supabase_auth_admin', 'auth_private\.before_user_created\(jsonb\)', 'EXECUTE'\)/);
+    assert.match(sql, /has_schema_privilege\('supabase_auth_admin', 'auth_private', 'USAGE'\)/);
+    assert.doesNotMatch(sql, /grant\s+supabase_auth_admin\s+to|alter\s+role/i);
+  }
   assert.doesNotMatch(hosted, /supabase_migrations|schema_migrations/);
 });
 

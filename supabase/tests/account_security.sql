@@ -88,7 +88,7 @@ select pg_temp.assert(not has_function_privilege('anon', 'auth_private.before_us
 select pg_temp.assert(not has_function_privilege('service_role', 'auth_private.before_user_created(jsonb)', 'EXECUTE'), 'default service grant cannot expose signup hook');
 select pg_temp.assert(not has_function_privilege('service_role', 'auth_private.shares_current_group(uuid)', 'EXECUTE'), 'default service grant cannot expose membership helper');
 select pg_temp.assert(has_function_privilege('supabase_auth_admin', 'auth_private.before_user_created(jsonb)', 'EXECUTE')
-  and has_schema_privilege('supabase_auth_admin', 'auth_private', 'USAGE'), 'Auth can invoke private hook');
+  and has_schema_privilege('supabase_auth_admin', 'auth_private', 'USAGE'), 'Auth role has hook EXECUTE and schema USAGE grants');
 select pg_temp.assert(not has_schema_privilege('authenticated', 'auth_private', 'CREATE'), 'client cannot replace private helpers');
 select pg_temp.assert((select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid = 'auth_private.shares_current_group(uuid)'::regprocedure), 'membership helper has fixed search path');
 select pg_temp.assert((select not prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid = 'auth_private.before_user_created(jsonb)'::regprocedure), 'signup hook is invoker with fixed search path');
@@ -96,7 +96,7 @@ select pg_temp.assert(not exists(select 1 from pg_policies where schemaname = 'p
   and policyname = 'profiles are readable by signed-in users'), 'global profile read policy removed');
 select pg_temp.assert((select relrowsecurity from pg_class where oid = 'public.profiles'::regclass), 'profiles remain RLS protected');
 
-set local role supabase_auth_admin;
+-- Still the function owner from RESET ROLE above, not the Auth runtime role.
 select pg_temp.assert(auth_private.before_user_created('{"user":{"email":"normal+tag@example.com"}}') = '{}', 'plus addressing accepted');
 select pg_temp.assert(auth_private.before_user_created('{"user":{"email":"drop.table@example.com"}}') = '{}', 'SQL words in valid email accepted');
 select pg_temp.assert(auth_private.before_user_created('{"user":{"email":"USER@EXAMPLE.COM"}}') = '{}', 'uppercase ASCII accepted');
