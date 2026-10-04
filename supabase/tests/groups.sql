@@ -1,6 +1,20 @@
 -- Run after migrations in a disposable database. All fixtures roll back.
 \set ON_ERROR_STOP on
 begin;
+    create function pg_temp.assert_storage_delete_guard() returns void language plpgsql as $$
+    begin
+        if to_regprocedure('storage.protect_delete()') is null then return; end if;
+        begin
+            execute 'delete from storage.objects where false';
+        exception when others then
+            -- Accept the permission code or a generic RAISE EXCEPTION code.
+            -- Require the guard's exact message, not an unrelated RLS error.
+            if sqlstate in ('42501', 'P0001') and sqlerrm = 'Direct deletion from storage tables is not allowed. Use the Storage API instead.' then return; end if;
+            raise;
+        end;
+        raise exception 'FAILED: Storage deletion guard was bypassed';
+    end;
+    $$;
     create function pg_temp.assert(ok boolean, message text) returns void language plpgsql as $$
     begin
         if ok is distinct from true
@@ -351,9 +365,19 @@ begin;
             delete
             from
                 public.photos;
+            -- Metadata-only fixtures in this disposable, rolled-back test.
+            -- Storage's statement guard fires even when RLS permits zero rows.
+            -- Temporarily simulate the API flag to test revoked-member RLS,
+            -- then restore the guard. Real object deletion uses the Storage API.
+            select pg_temp.assert(coalesce(current_setting('storage.allow_delete_query', true), 'false') <> 'true', 'Storage deletion guard starts enabled');
+            select pg_temp.assert_storage_delete_guard();
+            set local storage.allow_delete_query = 'true';
             delete
             from
                 storage.objects;
+            set local storage.allow_delete_query = 'false';
+            select pg_temp.assert(current_setting('storage.allow_delete_query', true) = 'false', 'Storage deletion guard restored');
+            select pg_temp.assert_storage_delete_guard();
             reset role;
             select
                 pg_temp.assert(

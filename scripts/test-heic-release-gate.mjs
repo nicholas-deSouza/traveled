@@ -14,3 +14,16 @@ test('every selected Linux artifact job requires cropped HEIC compatibility', ()
   assert.match(job, /--platform linux\/amd64/);
   assert.match(job, /build-nodejs24\.x/);
 });
+
+test('root and classifier-local corpus commands use checked-in fixtures', () => {
+  for (const [file, directory] of [
+    ['../package.json', 'infrastructure/photo-classifier/test/fixtures/heic'],
+    ['../infrastructure/photo-classifier/package.json', 'test/fixtures/heic'],
+  ]) {
+    const { scripts } = JSON.parse(readFileSync(new URL(file, import.meta.url), 'utf8'));
+    const args = scripts['test:heic:corpus'].split(/\s+/);
+    assert.ok(args.includes('--require-crop'));
+    assert.equal(args[args.indexOf('--fixtures') + 1], directory, `${file}: corpus must run offline`);
+    assert.ok(readFileSync(new URL(`../${file.includes('classifier') ? 'infrastructure/photo-classifier/' : ''}${directory}/clap_cropped.heic`, import.meta.url)).length);
+  }
+});

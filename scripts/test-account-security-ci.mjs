@@ -96,3 +96,17 @@ test('fresh schema SQL failure stops SQL suites and Storage checks', () => {
   assert.ok(!calls.some(call => call.includes(' -f supabase/tests/')));
   assert.ok(!calls.includes('node\tscripts/check-upload-storage.mjs'));
 });
+
+test('revoked-member Storage deletion checks scope the statement guard override without bypassing RLS', () => {
+  const sql = readFileSync(new URL('../supabase/tests/groups.sql', import.meta.url), 'utf8');
+  const override = sql.indexOf("set local storage.allow_delete_query = 'true';");
+  const restore = sql.indexOf("set local storage.allow_delete_query = 'false';", override);
+  assert.ok(override > 0 && restore > override);
+  assert.match(sql.slice(override, restore), /^set local storage\.allow_delete_query = 'true';\s*delete\s+from\s+storage\.objects;\s*$/);
+  assert.equal(sql.match(/set local storage\.allow_delete_query = 'true';/g)?.length, 1);
+  assert.equal(sql.match(/pg_temp\.assert_storage_delete_guard\(\)/g)?.length, 3, 'definition and before/after checks');
+  assert.match(sql, /sqlerrm = 'Direct deletion from storage tables is not allowed\. Use the Storage API instead\.'/);
+  assert.doesNotMatch(sql, /disable\s+(?:row level security|trigger)|session_replication_role/i);
+  assert.ok(sql.indexOf('removed uploader cannot delete files', restore) > restore);
+  assert.match(sql, /rollback;\s*\\echo 'All group security assertions passed\.'\s*$/i);
+});

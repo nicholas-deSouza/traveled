@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node stage-vendor.mjs dist",
     "test": "node --experimental-strip-types --test test/*.test.mjs",
-    "test:heic:corpus": "node test/heic-corpus.mjs --require-crop",
+    "test:heic:corpus": "node test/heic-corpus.mjs --require-crop --fixtures test/fixtures/heic",
     "smoke": "npm run build && node test/artifact-smoke.mjs"
   },
   "dependencies": { "sharp": "0.35.5" },
