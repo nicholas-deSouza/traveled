@@ -112,6 +112,73 @@ Local verification against camera C's original reported only booleans: valid GPS
 
 Verification: `pnpm test` 259 passes (163 + 76 + 20), `pnpm lint` passes, `pnpm build --outDir /private/tmp/traveled-heic-gps-fix-20261003-1612` passes (existing large-chunk warning), scoped `git diff --check` passes. Live end-to-end rerun remains pending: localhost still runs the separate main checkout, not this worktree. Existing published camera C has no saved GPS and was not backfilled. Prior screenshots show the pre-fix upload, not proof of this metadata fix. No new live walkthrough/recording was possible under that checkout/environment limitation.
 
+### Requested updated-main live rerun — blocked prerequisite
+
+The requested rerun was attempted on 2026-10-03. Listening Vite process PID 7375 on localhost:5173 had working directory `/Users/nicholas/Documents/ChatGPT/traveled`. That checkout's `main` was still `027ce21`, and its metadata reader lacked the HEIC compatibility fallback. Locally available `origin/main` and this validation worktree were `def6e06c7e555d9307645eb23ed4a459cccbdddf`, which includes the fallback. Thus the running frontend could not be confirmed as updated.
+
+An escalated `git merge --ff-only origin/main` in the main checkout failed before updating HEAD: macOS denied creation of `.git/ORIG_HEAD.lock` (`Operation not permitted`). Terminal computer control was also disallowed. The unrelated `skills-lock.json` change was preserved. The operator was asked to fast-forward that checkout and restart `pnpm dev`.
+
+The existing Arc Supabase SQL Editor tab was signed in, but subsequent computer control returned `noWindowsAvailable`. No SQL was executed, no admission settings were changed, and no new health result was obtained. Camera C was not re-uploaded. Original verification, GPS, processing, candidate verification, publication, final submission checks, and the requested published-photo/settled-queue screenshot are **NOT RUN** for this rerun. Release acceptance remains **PENDING**.
+
+After the updated frontend is confirmed and camera C is uploaded, run this read-only metadata-safe query in SQL Editor. It selects the newest submission in the existing test trip and omits filenames, coordinates, hashes, object paths, credentials, and provider bodies. Correlate the returned ID/time with this upload before counting it as a pass:
+
+```sql
+with newest as (
+  select id, created_at, outcome, original_approved, candidate_approved,
+         gps_acknowledged, cleanup_pending
+  from upload_private.submissions
+  where trip_id = '28a013ad-23ec-458e-bcc8-f77672fefcb7'::uuid
+  order by created_at desc, id desc
+  limit 1
+)
+select s.id, s.created_at, s.outcome, s.original_approved,
+       s.candidate_approved, s.gps_acknowledged, s.cleanup_pending,
+       (p.id is not null and p.latitude is not null
+        and p.longitude is not null) as gallery_gps_present
+from newest s
+left join public.photos p on p.id = s.id;
+
+select public.upload_health();
+```
+
+Required result: `published`, both approvals true, GPS acknowledgement true, gallery GPS present true, cleanup pending false; health failed jobs, pending cleanup, and outstanding reservations zero. These remain expected values, not observed results.
+
+### Updated-main live rerun — executed, GPS preservation FAIL
+
+The operator pulled the changes and restarted the frontend. Subsequent checks confirmed branch `main` at `def6e06`, with `legacyHeicGpsInput` present in its metadata reader. New listening Vite PID 32581 served localhost:5173 from `/Users/nicholas/Documents/ChatGPT/traveled`. The existing signed-in test trip was opened in Codex's browser. Camera C's original HEIC was selected from the operator-requested path (3,099,573 bytes) and uploaded once.
+
+Baseline SQL Editor health: Cron, pg_net, queues and scheduling true; unfinished, failed jobs, quota pauses, expired leases, pending cleanup and outstanding reservation bytes zero; storage bytes 5,645,982; admission enabled. No admission settings were changed.
+
+Submission `e8142094-8875-431f-abbf-a7605a29e2fe`, created `2026-10-03 23:30:19.695571+00` (16:30:19 PDT), was identified as the newest test-trip submission while original verification was underway. A subsequent ID-scoped read-only SQL Editor query returned:
+
+| Gate | Observed result |
+| --- | --- |
+| Original verification | PASS: `original_approved = true` |
+| GPS protocol stage | PASS: `gps_acknowledged = true` |
+| GPS preservation | **FAIL: `gallery_gps_present = false`** |
+| Image processing | PASS for completion: resulting image visible in gallery; intermediate processing phase not individually captured |
+| Candidate verification | PASS: `candidate_approved = true` |
+| Publication | PASS: `outcome = 'published'`; newest gallery tile shows camera C's scene |
+| Cleanup | PASS for tracked state: `cleanup_pending = false` |
+
+Original transfer and awaiting original verification were observed in the UI. Later stages completed between observations; approval/GPS/publication checks above are final persisted evidence, not individual screenshots of every intermediate stage. Metadata-safe SQL omitted coordinates, filenames, object paths, hashes, credentials and provider bodies. The GPS compatibility fix therefore does **not** pass live acceptance despite successful publication. Cause remains undiagnosed; no backfill or additional code/schema changes were made.
+
+Final `public.upload_health()` in SQL Editor: Cron, pg_net, queues and scheduling true; unfinished, failed jobs, quota pauses, expired leases, pending cleanup and outstanding reservation bytes all zero; storage bytes 6,071,764; admission enabled. The frontend queue showed zero awaiting completion. Old unsupported-fixture outcomes remain visible and do not represent unfinished work.
+
+Screenshot: `/private/tmp/traveled-heic-gps-published-20261003.jpg` shows the newly published HEIC as the first tile and the settled queue. Private screenshot pixels are retained locally and were not committed to the repository. Release acceptance remains **PENDING**, with the requested non-null gallery GPS gate **FAILED**.
+
+### Fresh-tab HEIC GPS retry — PASS
+
+At the user's request, camera C was uploaded again after the older localhost tabs were no longer present in Arc's observed tab list. Codex's prior frontend tab was also absent; a fresh signed-in localhost tab was opened. Main remained `def6e06` with the compatibility fallback present, and restarted Vite PID 33109 served `/Users/nicholas/Documents/ChatGPT/traveled`. No source, database, credential, admission or existing-photo changes were made for this retry.
+
+The fresh upload created submission `436118eb-5c8d-476a-b228-14a0997c362e` at `2026-10-03 23:34:27.728136+00` (16:34:27 PDT). SQL Editor first identified it as the newest test-trip submission during original verification, then confirmed the same ID with `outcome = 'published'`, `original_approved = true`, `candidate_approved = true`, `gps_acknowledged = true`, `gallery_gps_present = true`, and `cleanup_pending = false`. The metadata-safe query returned only these flags, ID and creation time, excluding coordinate values and private metadata.
+
+Original transfer and awaiting original verification were observed directly; successful processing and subsequent stages are confirmed by final approvals, publication and the displayed gallery image rather than separate intermediate-stage captures. This retry **PASSES the requested HEIC GPS preservation gate**. Success with the fresh tab supports an older frontend client having handled the previous GPS step, but the responsible client was not instrumented, so that explanation remains an inference.
+
+Baseline health: all required service flags true, no unfinished/failed jobs, quota pauses, expired leases, pending cleanup or outstanding reservations; storage bytes 6,071,764. Final `public.upload_health()` again reported all required service flags true and all those counts zero, with storage bytes 6,497,546 and admission enabled. The frontend showed zero awaiting completion. Screenshot `/private/tmp/traveled-heic-gps-retry-20261003.jpg` shows the new publication as the first gallery tile and the settled queue; private pixels remain local and are not committed. Older test outcomes/photos were preserved.
+
+Overall release acceptance remains **PENDING** for the separately documented Linux/cross-account/device/interruption and cropped-HEIC compatibility gaps; this successful retry supersedes the prior failure only for the requested camera C GPS rerun.
+
 ## Acceptance status
 
 Final local validation passed as above. The unsupported-source fix and HEIC top-level/context changes are reviewable in this worktree; they are not deployed. No schema, API wire contract, or RLS changes were made.
