@@ -67,7 +67,7 @@ it.each(['lookup', 'auth event'])('discards another account’s pending invitati
   expect(pendingInvitation()).toBeNull();
 });
 
-it('clears a pending invitation when the account signs out', async () => {
+it('keeps an expired-session invitation associated with the previous account', async () => {
   rememberInvitation(`/join#token=${'a'.repeat(64)}`);
   auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'account-a' } } }, error: null });
   mountAccount();
@@ -76,6 +76,8 @@ it('clears a pending invitation when the account signs out', async () => {
   const notify = auth.onAuthStateChange.mock.calls[0][0];
   act(() => notify('SIGNED_OUT', null));
   expect(await screen.findByText('Login')).toBeInTheDocument();
+  expect(pendingInvitation()).not.toBeNull();
+  bindInvitation('account-b');
   expect(pendingInvitation()).toBeNull();
 });
 

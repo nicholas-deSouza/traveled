@@ -1,9 +1,10 @@
 import { Compass, MapPinned, Users } from "lucide-react";
 import { useEffect, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import { supabase } from '../../lib/supabase';
+import { forgetInvitation } from '../../lib/pendingInvitation';
 
 const navItems = [
   { to: "/", label: "Explore", icon: Compass },
@@ -11,6 +12,7 @@ const navItems = [
 ];
 
 export function AppShell() {
+  const navigate = useNavigate();
   const { pathname } = useLocation();
   const activeNavIndex = navItems.findIndex(({ to }) =>
     to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`),
@@ -31,6 +33,8 @@ export function AppShell() {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
+      forgetInvitation();
+      navigate('/login', { replace: true });
     } catch { setError('Could not sign out. Please try again.'); }
     finally { setBusy(false); }
   }

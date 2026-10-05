@@ -3,9 +3,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Field } from '../components/ui/field';
-import { createInvitation, createTrip, errorMessage, loadGroup, revokeInvitation } from '../lib/groups';
+import { createInvitation, createTrip, errorMessage, GroupAccessError, loadGroup, revokeInvitation } from '../lib/groups';
 import { useResource } from '../lib/useResource';
 import { useSession } from '../lib/useSession';
+
+function retainGroupData(error: unknown) { return !(error instanceof GroupAccessError); }
 
 export function GroupDetailPage() {
   const { groupId = '' } = useParams();
@@ -15,7 +17,7 @@ export function GroupDetailPage() {
 function GroupContent({ groupId }: { groupId: string }) {
   const { user } = useSession();
   const navigate = useNavigate();
-  const { data, error, loading, refreshing, reload } = useResource(groupId, loadGroup, undefined, { keepPreviousData: true });
+  const { data, error, loading, refreshing, reload } = useResource(groupId, loadGroup, undefined, { keepPreviousData: true, retainOnError: retainGroupData });
   useEffect(() => {
     window.addEventListener('focus', reload);
     return () => window.removeEventListener('focus', reload);

@@ -33,7 +33,9 @@ export function LoginPage() {
       // Reuse the callback's destination validation for both sign-in methods.
       const redirect = new URL('/auth/callback', window.location.origin);
       redirect.searchParams.set('next', authDestination(params.get('next')));
-      rememberInvitation(authDestination(params.get('next')));
+      const nextUser = params.get('nextUser');
+      if (nextUser) redirect.searchParams.set('nextUser', nextUser);
+      else rememberInvitation(authDestination(params.get('next')));
 
       if (mode === 'password') {
         const { error } = await supabase.auth.signInWithPassword({ email: address, password });

@@ -2,10 +2,10 @@ import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
-import { loadGroup, createTrip } from '../lib/groups';
+import { loadGroup, createTrip, GroupAccessError } from '../lib/groups';
 import { GroupDetailPage } from './GroupDetailPage';
 
-vi.mock('../lib/groups', () => ({ loadGroup: vi.fn(), createTrip: vi.fn(), createInvitation: vi.fn(), revokeInvitation: vi.fn(), errorMessage: (error: Error) => error.message }));
+vi.mock('../lib/groups', () => ({ GroupAccessError: class extends Error {}, loadGroup: vi.fn(), createTrip: vi.fn(), createInvitation: vi.fn(), revokeInvitation: vi.fn(), errorMessage: (error: Error) => error.message }));
 vi.mock('../lib/useSession', () => ({ useSession: () => ({ user: { id: 'member' } }) }));
 function mount() {
   return render(<MemoryRouter initialEntries={['/groups/friends']}><Routes><Route path="/groups/:groupId" element={<GroupDetailPage />} /><Route path="/trips/new-trip" element={<p>New trip details</p>} /></Routes></MemoryRouter>);
@@ -87,4 +87,16 @@ it('reports failed member refreshes and allows retrying', async () => {
   expect(screen.getByRole('button', { name: 'Create invite link' })).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
   expect(await screen.findByText('Sam')).toBeInTheDocument();
+});
+
+it('removes private group content and controls when access is revoked', async () => {
+  vi.mocked(loadGroup).mockResolvedValueOnce(ownerOnly).mockRejectedValueOnce(new GroupAccessError());
+  mount();
+  await screen.findByText('Alex (you)');
+  act(() => window.dispatchEvent(new Event('focus')));
+  await screen.findByRole('alert');
+  expect(screen.queryByText('Alex (you)')).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Friends' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Create a trip' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Create invite link' })).not.toBeInTheDocument();
 });
