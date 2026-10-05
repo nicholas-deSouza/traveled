@@ -4,6 +4,7 @@ import { expect, it, vi } from 'vitest';
 import { App } from './App';
 
 vi.mock('./components/maps/TravelGlobe', () => ({ TravelGlobe: () => <div /> }));
+vi.mock('./components/maps/PhotoLocationMap', () => ({ PhotoLocationMap: () => <div /> }));
 it('routes unknown URLs to the protected home page', async () => {
   render(<MemoryRouter initialEntries={['/missing']}><App /></MemoryRouter>);
   expect(await screen.findByRole('heading', { name: 'Connect your shared atlas' })).toBeInTheDocument();

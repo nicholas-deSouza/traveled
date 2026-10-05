@@ -134,6 +134,21 @@ export async function deletePhoto(photoId: string): Promise<void> {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('traveled:photo-changed'));
 }
 
+export async function updatePhotoLocations(tripId: string, photoIds: string[], coordinates: Coordinates): Promise<void> {
+  if (!photoIds.length || photoIds.length > 100 || new Set(photoIds).size !== photoIds.length)
+    throw new Error('Select between 1 and 100 photos.');
+  const { latitude, longitude } = coordinates;
+  if (typeof latitude !== 'number' || !Number.isFinite(latitude) || Math.abs(latitude) > 90
+    || typeof longitude !== 'number' || !Number.isFinite(longitude) || Math.abs(longitude) > 180)
+    throw new Error('Choose a valid photo location.');
+  // An atomic RPC under RLS updates published metadata only, independently of uploads.
+  const { error } = await client().rpc('set_photo_locations', {
+    target_trip_id: tripId, photo_ids: photoIds, location_latitude: latitude, location_longitude: longitude,
+  });
+  if (error) throw error;
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('traveled:photo-changed', { detail: { tripId } }));
+}
+
 // Metadata only: never download the entire atlas's original images.
 async function allRows<T>(table: string, columns: string): Promise<T[]> {
   const rows: T[] = [];
