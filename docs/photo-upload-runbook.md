@@ -86,3 +86,27 @@ Use `public.upload_health()` plus aggregate private job/submission queries to tr
 Server jobs use 120-second leases and bounded 90-second worker requests. Retry cycles have an initial attempt and four retries at 2/4/8/16 seconds plus jitter; quota pauses do not consume attempts. Cleanup progresses independently per object and missing objects count as removed. Exhausted cleanup retries remain discoverable and begin another daily cycle. Operators can invoke service-only `public.upload_retry_cleanup(sid)` for a specific retained cleanup job, after diagnosing the underlying failure.
 
 Unresolved submissions expire seven days after creation. Cleanup records survive trip deletion. Permanent minimal identities/paths catch late uploads and deny resurrection. After terminal cleanup, filenames, source fingerprints, submission GPS and detailed errors are scrubbed; GPS already committed to the gallery remains. Log counts and operational stages only, excluding image bytes, GPS, filenames, signed URLs, provider payloads and credentials.
+
+## Photos paused before upload
+
+If the queue reports `Uploads are paused`, new admission is disabled by the
+operator switch; this does not mean project Storage is full. The deployment
+workflow disables admission and deliberately leaves it disabled for release
+checks. Through trusted SQL Editor access, run:
+
+```sql
+select public.upload_health();
+```
+
+Confirm `admission_enabled` and the `queues`, `cron`, `pg_net`, and `scheduled`
+flags. If admission is disabled, complete the deployment/release checks above,
+resolve any worker failures, then re-enable admission using the existing release
+step and rerun the health query. Do not bypass the gate just to hide the pause.
+
+`Storage capacity is paused` instead means the application budget cannot cover
+another reservation; inspect storage bytes and outstanding reservations.
+`Queue is full` means that user's active queue has reached its limit. These
+pauses retry automatically without consuming technical retry attempts. Ask the
+user to keep the original tab open: pending files remain in that tab's memory,
+and a reload may require selecting the same originals again. `Retry failed` is
+disabled because these items are waiting, rather than technically failed.

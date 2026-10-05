@@ -35,3 +35,12 @@ describe('authenticated upload boundary', () => {
     expect(error).toMatchObject({ message: 'Storage capacity is paused', status: 503, pause_reason: 'capacity', retryable: true });
   });
 });
+
+it.each([
+  ['Uploads are paused', 'admission'],
+  ['Queue is full', 'queue'],
+  ['Storage capacity is paused', 'capacity'],
+  ['Provider quota is paused', 'quota'],
+])('distinguishes %s and keeps the pause retryable', (message, reason) => {
+  expect(new UploadApiError(message, 503)).toMatchObject({ pause_reason: reason, retryable: true });
+});
