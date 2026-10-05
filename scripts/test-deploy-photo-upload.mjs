@@ -1,10 +1,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { deployBackend as deploy } from './deploy-photo-upload.mjs';
 import { createDiagnostics } from './script-diagnostics.mjs';
 
 const quiet = createDiagnostics('test', () => {});
 const deployBackend = (phase, env, fetchRequest, diagnostics = quiet) => deploy(phase, env, fetchRequest, diagnostics);
+
+test('automatic backend deployment includes vendored classifier build inputs', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/deploy-photo-upload.yml', import.meta.url), 'utf8');
+  const push = workflow.split('  push:')[1].split('  workflow_dispatch:')[0];
+  assert.match(push, /branches: \[main\]/);
+  assert.ok(push.includes("'infrastructure/photo-classifier/stage-vendor.mjs'"));
+  assert.ok(push.includes("'vendor/libheif-1.23.5/**'"));
+});
 
 const env = {
   SUPABASE_PROJECT_REF: 'abcdefghijklmnopqrst',

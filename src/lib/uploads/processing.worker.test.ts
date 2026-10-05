@@ -5,7 +5,7 @@ import { optimizePhoto } from './processing.worker';
 const heif = vi.hoisted(() => ({ initialize: vi.fn() }));
 const fallback = vi.hoisted(() => ({ encodeWebp: vi.fn() }));
 vi.mock('./webpEncoder', () => fallback);
-vi.mock('libheif-js/libheif-wasm/libheif-bundle.mjs', () => ({ default: heif.initialize }));
+vi.mock('./heicDecoder', () => ({ initializeHeicDecoder: heif.initialize }));
 const jpeg = () => new Blob([new Uint8Array([255, 216, 255])], { type: 'image/jpeg' });
 const heic = () => new Blob([new Uint8Array([0, 0, 0, 24, ...new TextEncoder().encode('ftypheic')])]);
 let bitmap: { width: number; height: number; close: ReturnType<typeof vi.fn> };

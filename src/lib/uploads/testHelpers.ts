@@ -25,7 +25,8 @@ export function fakeLocks(): LockManager {
 }
 export function memoryStore(): MetadataStore & { values: Map<string, UploadMetadata> } {
   const values = new Map<string, UploadMetadata>();
-  return { values, list: async () => [...values.values()], put: async (value) => { values.set(value.submission.id, structuredClone(value)); }, clear: async () => { values.clear(); } };
+  return { values, list: async () => [...values.values()], put: async (value) => { values.set(value.submission.id, structuredClone(value)); },
+    remove: async (id) => { values.delete(id); }, clear: async () => { values.clear(); } };
 }
 export function fakeChannel(): BroadcastChannel {
   return { postMessage: vi.fn(), close: vi.fn(), onmessage: null } as unknown as BroadcastChannel;

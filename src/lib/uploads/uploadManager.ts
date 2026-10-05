@@ -303,6 +303,18 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
     }
     const response = await request({ action: 'list' });
     for (const submission of response.submissions ?? []) await save(submission);
+    // Match the server's seven-day finished-result window. Reconcile first so
+    // unfinished recovery and pending cleanup are never discarded from stale data.
+    const cutoff = Date.now() - UPLOAD_LIMITS.expiryDays * 86400000;
+    for (const [id, value] of metadata) {
+      if (lifetime.signal.aborted) throw new StoppedUpload();
+      const submission = value.submission;
+      if (!submission.outcome || submission.cleanup_pending || Date.parse(submission.created_at) > cutoff
+        || !Number.isFinite(Date.parse(submission.created_at))) continue;
+      await deps.store.remove(id);
+      metadata.delete(id); items.delete(id); files.delete(id); targets.delete(id); checked.delete(id);
+    }
+    emit();
     return [...items.values()].filter((item) => !item.outcome && item.local_status !== 'failed').map((item) => item.id);
   }
   async function lead() {
@@ -462,5 +474,5 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   };
   function activeCount() { return [...items.values()].filter((item) => !item.outcome && item.local_status !== 'failed' && item.pause_reason !== 'technical').length; }
 }
-const unavailableStore: MetadataStore = { list: async () => [], put: async () => undefined, clear: async () => undefined };
+const unavailableStore: MetadataStore = { list: async () => [], put: async () => undefined, remove: async () => undefined, clear: async () => undefined };
 const unavailableChannel = { close() {}, postMessage() {}, onmessage: null } as unknown as BroadcastChannel;

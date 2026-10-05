@@ -250,7 +250,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
       {thumbnails.map(point => <PhotoMarker key={point.id} point={point} />)}
       {popup && <TripLocationPopup key={`${popup.tripId}-${popup.coordinates.join(',')}`} popup={popup} onClose={closePopup} onZoom={() => { if (popupRef.current) void zoomToCluster.current?.(popupRef.current); }} zooming={zooming} error={zoomError} />}
     </div>
-    <p className="pointer-events-none absolute bottom-16 left-3 max-w-56 rounded-lg bg-white/95 px-3 py-2 text-xs text-ink/80">Numbered circles group photos across locations. Select one to explore.</p>
+    <p className="pointer-events-none absolute bottom-16 left-3 max-w-56 rounded-lg bg-white/95 px-3 py-2 text-xs text-ink/80">Numbered circles group photos at the same location. Select one to explore.</p>
     <div className="absolute left-3 top-3 rounded-xl bg-white/95 p-2">
       <Button size="sm" variant="outline" disabled={reducedMotion} aria-pressed={paused || reducedMotion} onClick={() => {
         pausedRef.current = !pausedRef.current;

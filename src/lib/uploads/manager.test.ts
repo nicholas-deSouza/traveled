@@ -41,6 +41,35 @@ function harness(initial: UploadSubmission[] = []) {
 }
 async function flush() { for (let index = 0; index < 40; index++) await Promise.resolve(); }
 const unfinishedStages: UploadPhase[] = ['original_upload', 'original_check', 'gps', 'processing', 'candidate_upload', 'candidate_check', 'publication'];
+it('prunes old finished metadata after reconciliation while preserving recovery, cleanup and recent dismissals', async () => {
+  vi.useFakeTimers();
+  const old = new Date(Date.now() - 8 * 86400000).toISOString();
+  const { manager, store, server, dependencies } = harness([
+    submission({ id: 'recover', phase: 'original_check', created_at: old }),
+    submission({ id: 'cleanup', phase: 'complete', outcome: 'canceled', created_at: old, cleanup_pending: true }),
+    submission({ id: 'recent', phase: 'complete', outcome: 'rejected' }),
+  ]);
+  for (const item of [
+    submission({ id: 'old-published', phase: 'complete', outcome: 'published', created_at: old }),
+    submission({ id: 'old-local-invalid', phase: 'complete', outcome: 'invalid', created_at: old }),
+    ...server.values(),
+  ]) await store.put({ submission: item, admissionRequest: item.id, candidateRequest: null,
+    originalAcknowledged: true, dismissed: item.outcome === 'rejected' || item.outcome === 'invalid' });
+  // A stale local record says cleanup is complete; current server state must win.
+  store.values.get('cleanup')!.submission.cleanup_pending = false;
+  manager.start(); await flush();
+  expect([...store.values.keys()].sort()).toEqual(['cleanup', 'recent', 'recover']);
+  expect(manager.getSnapshot().items.map(item => item.id).sort()).toEqual(['cleanup', 'recover']);
+  expect(store.values.get('recent')?.dismissed).toBe(true);
+  manager.stop(); manager.start(); await flush();
+  expect(store.values.has('old-local-invalid')).toBe(false);
+  expect(store.values.get('recent')?.dismissed).toBe(true);
+  server.get('cleanup')!.cleanup_pending = false;
+  await vi.advanceTimersByTimeAsync(2500); await flush();
+  expect(store.values.has('cleanup')).toBe(false);
+  expect(store.values.has('recover')).toBe(true);
+  expect(dependencies.api.transfer).not.toHaveBeenCalled();
+});
 it('dismisses only finished visible results and retains dismissal across polling and restart', async () => {
   vi.useFakeTimers();
   const { manager, requests, store } = harness([
