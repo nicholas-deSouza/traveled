@@ -52,7 +52,9 @@ it('explains when invitees appear and refreshes joined members and the count', a
   expect(screen.getByText(/Invited people appear here after/)).toBeInTheDocument();
   expect(screen.getByText(/No one else has joined yet/)).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Refresh members' }));
-  expect(screen.getByRole('status')).toHaveTextContent('Loading group');
+  expect(screen.getByRole('status')).toHaveTextContent('Refreshing group');
+  expect(screen.getByRole('heading', { name: 'Friends' })).toBeInTheDocument();
+  expect(screen.getByText('Alex (you)')).toBeInTheDocument();
   await act(async () => finishRefresh(withInvitees));
   const members = within(screen.getByRole('list', { name: 'Group members' }));
   expect(members.getByText('Sam')).toBeInTheDocument();
@@ -80,6 +82,9 @@ it('reports failed member refreshes and allows retrying', async () => {
   await screen.findByText('Alex (you)');
   await userEvent.click(screen.getByRole('button', { name: 'Refresh members' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Members unavailable');
+  expect(screen.getByRole('heading', { name: 'Friends' })).toBeInTheDocument();
+  expect(screen.getByText('Alex (you)')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create invite link' })).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
   expect(await screen.findByText('Sam')).toBeInTheDocument();
 });

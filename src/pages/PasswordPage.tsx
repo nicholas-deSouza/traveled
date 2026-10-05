@@ -35,13 +35,16 @@ export function PasswordPage() {
     }
     setBusy(true);
     try {
-      const validName = displayName(name);
-      await saveDisplayName(session.user.id, validName);
-      const { error } = await supabase.auth.updateUser({ password, data: { display_name: validName } });
+      const validName = name.trim() ? displayName(name) : undefined;
+      const { error } = await supabase.auth.updateUser({ password, ...(validName ? { data: { display_name: validName } } : {}) });
       if (error) throw error;
       setPassword('');
       setConfirmation('');
       setSaved(true);
+      if (validName) {
+        try { await saveDisplayName(session.user.id, validName); }
+        catch { setError('Your password was saved, but your profile name could not be updated. You can try updating your name again later.'); }
+      }
     } catch (error) {
       setError(errorMessage(error));
     } finally {
@@ -62,17 +65,18 @@ export function PasswordPage() {
         <>
           <p className="mt-3 text-sm leading-6 text-ink/65">Choose a password for {session.user.email} so you can sign in without an email link. You can also replace an existing password here.</p>
           <form onSubmit={submit} className="mt-6 space-y-4" aria-busy={busy}>
-            <Field label="Your name" autoComplete="name" name="display_name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} disabled={busy} />
+            <Field label="Your name" autoComplete="name" name="display_name" maxLength={80} value={name} onChange={event => setName(event.target.value)} disabled={busy} />
+            <p className="text-xs text-ink/65">Your name is optional when changing your password.</p>
             <input type="hidden" name="username" autoComplete="username" value={session.user.email || ''} />
             <Field label="New password" type="password" name="password" autoComplete="new-password" minLength={8} required value={password} onChange={event => setPassword(event.target.value)} disabled={busy} aria-describedby="password-help" />
             <p id="password-help" className="text-xs text-ink/65">Use at least 8 characters.</p>
             <Field label="Confirm password" type="password" name="confirm-password" autoComplete="new-password" minLength={8} required value={confirmation} onChange={event => setConfirmation(event.target.value)} disabled={busy} />
             <Button className="w-full" disabled={busy}>{busy ? 'Saving…' : 'Save password'}</Button>
           </form>
-          {error && <p className="mt-4 text-sm text-red-700" role="alert">{error}</p>}
           {!busy && <Link to={next} className="mt-5 block rounded text-center text-sm text-moss hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ember">Continue without changing password</Link>}
         </>
       )}
+      {error && <p className="mt-4 text-sm text-red-700" role="alert">{error}</p>}
     </section>
   );
 }

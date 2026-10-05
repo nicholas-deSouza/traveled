@@ -73,6 +73,7 @@ it('lets an invitee leave an expired invitation without being redirected back', 
   mount(`/join#token=${token}`);
   await userEvent.click(await screen.findByRole('button', { name: 'Join group' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Invitation expired');
+  expect(pendingInvitation()).toBeNull();
   await userEvent.click(screen.getByRole('link', { name: 'Back to your groups' }));
   expect(await screen.findByText('Your groups')).toBeInTheDocument();
   expect(pendingInvitation()).toBeNull();

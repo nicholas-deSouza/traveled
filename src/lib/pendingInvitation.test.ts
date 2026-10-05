@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { forgetInvitation, pendingInvitation, rememberInvitation } from './pendingInvitation';
+import { bindInvitation, forgetInvitation, pendingInvitation, rememberInvitation } from './pendingInvitation';
 
 const token = 'a'.repeat(64);
 afterEach(() => window.localStorage.removeItem('traveled:pending-invitation'));
@@ -22,6 +22,23 @@ it('expires pending invitations after seven days', () => {
   vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
   rememberInvitation(`/join#token=${token}`);
   vi.mocked(Date.now).mockReturnValue(1_000_000 + 7 * 24 * 60 * 60 * 1000);
+  expect(pendingInvitation()).toBeNull();
+});
+
+it('preserves signup invitations for the first account and discards them for another account', () => {
+  rememberInvitation(`/join#token=${token}`);
+  bindInvitation('account-a');
+  rememberInvitation(`/join#token=${token}`);
+  bindInvitation('account-a');
+  expect(pendingInvitation()).toBe(`/join#token=${token}`);
+  bindInvitation('account-b');
+  expect(pendingInvitation()).toBeNull();
+});
+
+it('clears the pending invitation on sign-out', () => {
+  rememberInvitation(`/join#token=${token}`);
+  bindInvitation('account-a');
+  forgetInvitation();
   expect(pendingInvitation()).toBeNull();
 });
 

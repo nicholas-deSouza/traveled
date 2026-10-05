@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { errorMessage } from '../../lib/groups';
 import { PhotoUploadProvider } from '../photos/PhotoUploadProvider';
-import { pendingInvitation, rememberInvitation } from '../../lib/pendingInvitation';
+import { bindInvitation, forgetInvitation, pendingInvitation, rememberInvitation } from '../../lib/pendingInvitation';
 
 export function RequireAuth() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [callbackError] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('error_description'));
   const [state, setState] = useState<{ loading: boolean; session: Session | null; error?: string }>({ loading: true, session: null });
   useEffect(() => {
@@ -17,17 +18,24 @@ export function RequireAuth() {
     if (!supabase) return;
     let active = true;
     let receivedAuthEvent = false;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       receivedAuthEvent = true;
-      if (active) setState({ loading: false, session });
+      if (active) {
+        if (event === 'SIGNED_OUT') { forgetInvitation(); navigate('/login', { replace: true }); }
+        else if (session) bindInvitation(session.user.id);
+        setState({ loading: false, session });
+      }
     });
     supabase.auth.getSession().then(({ data, error }) => {
       // A late initial snapshot must not restore an account after a newer
       // sign-out or account-switch event has already updated the UI.
-      if (active && !receivedAuthEvent) setState({ loading: false, session: data.session, error: error ? errorMessage(error) : undefined });
+      if (active && !receivedAuthEvent) {
+        if (data.session) bindInvitation(data.session.user.id);
+        setState({ loading: false, session: data.session, error: error ? errorMessage(error) : undefined });
+      }
     }).catch(error => { if (active && !receivedAuthEvent) setState({ loading: false, session: null, error: errorMessage(error) }); });
     return () => { active = false; subscription.unsubscribe(); };
-  }, []);
+  }, [navigate]);
   if (!supabase) return <div className="py-12"><h1 className="font-display text-4xl">Connect your shared atlas</h1><p className="mt-3">Groups require Supabase authentication and the database migrations. Follow the local setup in README.</p><Link className="mt-4 inline-block underline" to="/">Back to home</Link></div>;
   if (callbackError) {
     const next = new URLSearchParams(location.search).get('next') || '/';
