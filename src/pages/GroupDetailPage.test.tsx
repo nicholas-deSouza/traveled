@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
@@ -30,4 +30,56 @@ it('retries failed loads and shows owner controls', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('Unavailable');
   await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
   expect(await screen.findByRole('button', { name: 'Create invite link' })).toBeInTheDocument();
+});
+
+const ownerOnly = {
+  group: { id: 'friends', name: 'Friends', created_by: 'member' }, trips: [],
+  members: [{ user_id: 'member', role: 'owner' as const, profiles: { display_name: 'Alex' } }],
+};
+const withInvitees = {
+  ...ownerOnly,
+  members: [...ownerOnly.members,
+    { user_id: 'invitee', role: 'member' as const, profiles: { display_name: 'Sam' } },
+    { user_id: 'unnamed', role: 'member' as const, profiles: { display_name: ' ' } },
+  ],
+};
+
+it('explains when invitees appear and refreshes joined members and the count', async () => {
+  let finishRefresh!: (value: typeof withInvitees) => void;
+  vi.mocked(loadGroup).mockResolvedValueOnce(ownerOnly).mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve; }));
+  mount();
+  expect(await screen.findByText('Alex (you)')).toBeInTheDocument();
+  expect(screen.getByText(/Invited people appear here after/)).toBeInTheDocument();
+  expect(screen.getByText(/No one else has joined yet/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Refresh members' }));
+  expect(screen.getByRole('status')).toHaveTextContent('Loading group');
+  await act(async () => finishRefresh(withInvitees));
+  const members = within(screen.getByRole('list', { name: 'Group members' }));
+  expect(members.getByText('Sam')).toBeInTheDocument();
+  expect(members.getByText('Traveler')).toBeInTheDocument();
+  expect(members.getAllByRole('listitem')).toHaveLength(3);
+  expect(screen.getByText(/3 members · 0 trips/)).toBeInTheDocument();
+  expect(screen.queryByText(/No one else has joined yet/)).not.toBeInTheDocument();
+});
+
+it('updates members when returning to the window and removes its listener on unmount', async () => {
+  vi.mocked(loadGroup).mockResolvedValueOnce(ownerOnly).mockResolvedValueOnce(withInvitees);
+  const view = mount();
+  await screen.findByText('Alex (you)');
+  act(() => window.dispatchEvent(new Event('focus')));
+  expect(await screen.findByText('Sam')).toBeInTheDocument();
+  view.unmount();
+  vi.mocked(loadGroup).mockClear();
+  act(() => window.dispatchEvent(new Event('focus')));
+  expect(loadGroup).not.toHaveBeenCalled();
+});
+
+it('reports failed member refreshes and allows retrying', async () => {
+  vi.mocked(loadGroup).mockResolvedValueOnce(ownerOnly).mockRejectedValueOnce(new Error('Members unavailable')).mockResolvedValueOnce(withInvitees);
+  mount();
+  await screen.findByText('Alex (you)');
+  await userEvent.click(screen.getByRole('button', { name: 'Refresh members' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Members unavailable');
+  await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByText('Sam')).toBeInTheDocument();
 });

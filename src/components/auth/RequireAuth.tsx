@@ -4,11 +4,15 @@ import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { errorMessage } from '../../lib/groups';
 import { PhotoUploadProvider } from '../photos/PhotoUploadProvider';
+import { pendingInvitation, rememberInvitation } from '../../lib/pendingInvitation';
 
 export function RequireAuth() {
   const location = useLocation();
   const [callbackError] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('error_description'));
   const [state, setState] = useState<{ loading: boolean; session: Session | null; error?: string }>({ loading: true, session: null });
+  useEffect(() => {
+    if (location.pathname === '/join') rememberInvitation(location.pathname + location.hash);
+  }, [location.pathname, location.hash]);
   useEffect(() => {
     if (!supabase) return;
     let active = true;
@@ -32,5 +36,7 @@ export function RequireAuth() {
   if (state.loading) return <p className="py-12" role="status">Signing you in…</p>;
   if (state.error) return <p className="py-12" role="alert">{state.error} <Link to="/login" className="underline">Return to sign in</Link></p>;
   if (!state.session) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search + location.hash)}`} replace />;
+  const invitation = pendingInvitation();
+  if (location.pathname === '/' && invitation) return <Navigate to={invitation} replace />;
   return <PhotoUploadProvider key={state.session.user.id} userId={state.session.user.id}><Outlet context={state.session} /></PhotoUploadProvider>;
 }

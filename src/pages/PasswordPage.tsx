@@ -4,14 +4,18 @@ import { Button } from '../components/ui/button';
 import { Field } from '../components/ui/field';
 import { authDestination } from '../lib/authRedirect';
 import { errorMessage } from '../lib/groups';
+import { saveDisplayName } from '../lib/profiles';
 import { supabase } from '../lib/supabase';
 import { useSession } from '../lib/useSession';
+import { pendingInvitation } from '../lib/pendingInvitation';
+import { displayName } from '../lib/displayName';
 
 export function PasswordPage() {
   const session = useSession();
   const [params] = useSearchParams();
-  const next = authDestination(params.get('next'));
+  const next = authDestination(params.get('next') || pendingInvitation());
   const [password, setPassword] = useState('');
+  const [name, setName] = useState(session.user.user_metadata?.display_name === 'Traveler' ? '' : session.user.user_metadata?.display_name || '');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -31,7 +35,9 @@ export function PasswordPage() {
     }
     setBusy(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
+      const validName = displayName(name);
+      await saveDisplayName(session.user.id, validName);
+      const { error } = await supabase.auth.updateUser({ password, data: { display_name: validName } });
       if (error) throw error;
       setPassword('');
       setConfirmation('');
@@ -56,6 +62,7 @@ export function PasswordPage() {
         <>
           <p className="mt-3 text-sm leading-6 text-ink/65">Choose a password for {session.user.email} so you can sign in without an email link. You can also replace an existing password here.</p>
           <form onSubmit={submit} className="mt-6 space-y-4" aria-busy={busy}>
+            <Field label="Your name" autoComplete="name" name="display_name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} disabled={busy} />
             <input type="hidden" name="username" autoComplete="username" value={session.user.email || ''} />
             <Field label="New password" type="password" name="password" autoComplete="new-password" minLength={8} required value={password} onChange={event => setPassword(event.target.value)} disabled={busy} aria-describedby="password-help" />
             <p id="password-help" className="text-xs text-ink/65">Use at least 8 characters.</p>

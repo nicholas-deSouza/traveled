@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
@@ -16,6 +16,10 @@ function GroupContent({ groupId }: { groupId: string }) {
   const { user } = useSession();
   const navigate = useNavigate();
   const { data, error, loading, reload } = useResource(groupId, loadGroup);
+  useEffect(() => {
+    window.addEventListener('focus', reload);
+    return () => window.removeEventListener('focus', reload);
+  }, [reload]);
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -66,7 +70,7 @@ function GroupContent({ groupId }: { groupId: string }) {
     </form></Card>}
     <div className="mt-8 grid items-start gap-6 lg:grid-cols-[1fr_320px]">
       <section><h2 className="font-display text-2xl">Shared trips</h2>{trips.length === 0 && <Card className="mt-4 p-8"><p>No trips yet. Create your first trip, then fill it with photos.</p></Card>}<div className="mt-4 grid gap-4 sm:grid-cols-2">{trips.map(trip => <Link to={`/trips/${trip.id}`} key={trip.id} className="rounded-2xl focus-visible:ring-2 focus-visible:ring-ember"><Card className="h-full p-5 hover:shadow-md"><p className="text-sm text-ink/60">{trip.starts_on || 'Dates to come'}{trip.ends_on ? ` → ${trip.ends_on}` : ''}</p><h3 className="mt-6 break-words font-display text-2xl">{trip.title}</h3>{trip.description && <p className="mt-2 break-words text-sm text-ink/65">{trip.description}</p>}</Card></Link>)}</div></section>
-      <aside className="space-y-4"><Card className="p-5"><h2 className="font-display text-2xl">The people</h2><p className="mt-2 text-sm text-ink/65">Members can view trips and add photos.</p><ul className="mt-4 space-y-3">{members.map(member => <li key={member.user_id} className="flex items-center justify-between gap-2 text-sm"><span className="break-words">{member.profiles?.display_name || 'Traveler'}{member.user_id === user.id ? ' (you)' : ''}</span><span className="rounded-full bg-sand px-2 py-1 text-xs">{member.role}</span></li>)}</ul></Card>
+      <aside className="space-y-4"><Card className="p-5"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-display text-2xl">The people</h2><Button onClick={reload} variant="outline" size="sm">Refresh members</Button></div><p className="mt-2 text-sm text-ink/65">Members can view trips and add photos. Invited people appear here after they sign in and select Join group from your invitation link.</p>{!members.some(member => member.user_id !== user.id) && <p className="mt-4 text-sm text-ink/65">No one else has joined yet. If someone just joined, refresh the member list.</p>}<ul aria-label="Group members" className="mt-4 space-y-3">{members.map(member => <li key={member.user_id} className="flex items-center justify-between gap-2 text-sm"><span className="break-words">{member.profiles?.display_name?.trim() || 'Traveler'}{member.user_id === user.id ? ' (you)' : ''}</span><span className="rounded-full bg-sand px-2 py-1 text-xs">{member.role}</span></li>)}</ul></Card>
       {group.created_by === user.id && <Card className="p-5"><h2 className="font-display text-2xl">Invite your people</h2><p className="my-3 text-sm text-ink/65">Anyone with your link can sign in and join for seven days. Creating a new link replaces the previous one.</p><div className="flex flex-wrap gap-2"><Button onClick={() => manageInvite(false)} disabled={inviteBusy} size="sm">{inviteBusy ? 'Updating…' : 'Create invite link'}</Button><Button onClick={() => manageInvite(true)} disabled={inviteBusy} variant="outline" size="sm">Revoke link</Button></div>
         {invitation && <div className="mt-4 space-y-3"><Field label="Invitation link" readOnly value={invitation.url} onFocus={e => e.target.select()} /><p className="text-xs text-ink/60">Expires {invitation.expires}</p><Button onClick={copy} variant="outline" size="sm">Copy link</Button></div>}{message && <p role="status" className="mt-3 text-sm">{message}</p>}{inviteError && <p role="alert" className="mt-3 text-sm text-red-700">{inviteError}</p>}
       </Card>}</aside>
