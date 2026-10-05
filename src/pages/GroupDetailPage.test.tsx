@@ -100,3 +100,21 @@ it('removes private group content and controls when access is revoked', async ()
   expect(screen.queryByRole('button', { name: 'Create a trip' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Create invite link' })).not.toBeInTheDocument();
 });
+
+it('keeps the group visible after a session rejection and lets the member retry', async () => {
+  vi.mocked(loadGroup).mockResolvedValueOnce(withInvitees)
+    .mockRejectedValueOnce({ code: 'PGRST301', message: 'JWT expired', status: 401 })
+    .mockResolvedValueOnce(withInvitees);
+  mount();
+  await screen.findByText('Sam');
+  await userEvent.click(screen.getByRole('button', { name: 'Refresh members' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not refresh this group: JWT expired');
+  expect(screen.queryByText(/You must be a member/)).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Friends' })).toBeInTheDocument();
+  expect(screen.getByText('Sam')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create a trip' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByText('Sam')).toBeInTheDocument();
+  expect(loadGroup).toHaveBeenCalledTimes(3);
+});
