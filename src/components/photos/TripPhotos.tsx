@@ -62,7 +62,7 @@ export function TripPhotos({ tripId, title }: { tripId: string; title: string })
     {suggested.length > 0 && <div className="mt-4 rounded-xl bg-sand p-4">
       <h3 className="font-medium">Where were these photos taken?</h3>
       <p className="mt-1 text-sm text-ink/65">{suggested.length} of your photos on this page {suggested.length === 1 ? 'doesn’t' : 'don’t'} include a location. Add one to place them on your trip map.</p>
-      <div className="mt-3 flex gap-2"><Button variant="outline" onClick={() => setLocationPhotos(unlocated)}>Add location</Button><Button variant="ghost" onClick={() => later(suggested.map(photo => photo.id))}>Later</Button></div>
+      <div className="mt-3 flex gap-2"><Button variant="outline" onClick={() => setLocationPhotos(suggested)}>Add location</Button><Button variant="ghost" onClick={() => later(suggested.map(photo => photo.id))}>Later</Button></div>
     </div>}
     <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
       {data?.photos.map((photo, index) => {
