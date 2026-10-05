@@ -13,7 +13,13 @@ Traveled is a group-based travel journal: friends create a group, manually creat
 
 ## Local setup
 
-1. Install dependencies: `pnpm install`
+1. Install both the app and photo classifier dependencies (Node.js 24 or newer):
+
+   ```sh
+   pnpm install
+   npm ci --prefix infrastructure/photo-classifier --include=optional
+   ```
+
 2. Create a project inside your Supabase organization. Open the project's **Connect** dialog for its Project URL and publishable key (also available under **Settings → API Keys**).
 3. Create or update `.env` in the project root yourself:
 
@@ -90,8 +96,11 @@ EXIF extraction and mapping real uploaded photos remain future work.
 
 ## Component tests and pre-commit checks
 
-Run `pnpm install`, then `pnpm test` for the full local test suite: component/test
-pairing, Vitest component tests, and Node script tests. Use `pnpm test:watch` for
+Run both dependency installation commands from Local setup, then `pnpm test`
+for the full local test suite: component/test pairing, Vitest component tests,
+Node script tests, and photo classifier tests. The classifier's separate install
+provides `sharp` and its optional native dependencies for generated image fixtures.
+Use `pnpm test:watch` for
 component watch mode or `pnpm test:unit -- src/components/ui/button.test.tsx` to
 run one file. Tests use jsdom and React Testing Library, mock external services,
 and do not load `.env` files or require Supabase credentials.
