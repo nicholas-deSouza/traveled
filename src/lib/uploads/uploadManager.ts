@@ -59,7 +59,7 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   const checked = new Set<string>();
   const running = new Map<string, AbortController>();
   const listeners = new Set<() => void>();
-  let snapshot: UploadSnapshot = { items: [], error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and WebP canvas support. Use a current supported browser.', compatible };
+  let snapshot: UploadSnapshot = { items: [], error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and canvas support. Use a current supported browser.', compatible };
   const emit = () => {
     if (lifetime.signal.aborted) return;
     snapshot = { ...snapshot, items: [...items.values()] };
@@ -320,10 +320,10 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
         const context = canvas.getContext('2d');
         if (!context) throw new Error('Canvas processing is unavailable.');
         context.fillRect(0, 0, 1, 1);
-        const probe = await canvas.convertToBlob({ type: 'image/webp' });
-        if (probe.type !== 'image/webp') throw new Error('WebP encoding is unavailable.');
+        // Safari uses the bundled WebP encoder in the worker. Only canvas
+        // processing is required here; native WebP encoding is optional.
       } catch {
-        snapshot = { ...snapshot, compatible: false, error: 'Your browser cannot encode WebP photos. Use a current supported browser.' };
+        snapshot = { ...snapshot, compatible: false, error: 'Your browser cannot process photos. Use a current supported browser.' };
         emit(); return;
       }
     }

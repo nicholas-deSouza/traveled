@@ -12,6 +12,7 @@ async function check(name: string, run: () => Promise<void>) {
   status.textContent = results.some(result => result.result === 'FAIL') ? 'FAIL — inspect results' : `${results.length} checks passed`;
 }
 async function source(type: string, width = 96, height = 48) {
+  if (type === 'image/webp') return processPhoto(await source('image/png', width, height), new AbortController().signal);
   const canvas = new OffscreenCanvas(width, height);
   const context = canvas.getContext('2d');
   assert(Boolean(context), '2D canvas unavailable');
@@ -20,6 +21,26 @@ async function source(type: string, width = 96, height = 48) {
   assert(blob.type === type, `Browser cannot encode ${type} test input`);
   return blob;
 }
+await check('Bundled WebP encoder loads in a real worker when native encoding returns PNG', async () => {
+  const input = await source('image/png');
+  const worker = new Worker(new URL('./upload-browser-fallback.worker.ts', import.meta.url), { type: 'module' });
+  try {
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Fallback worker timed out')), 20000);
+      worker.onerror = () => { clearTimeout(timer); reject(new Error('Fallback worker failed')); };
+      worker.onmessage = (event: MessageEvent<{ ready?: boolean; blob?: Blob; error?: string }>) => {
+        if (event.data.ready) { worker.postMessage({ source: input }); return; }
+        clearTimeout(timer);
+        if (event.data.blob) resolve(event.data.blob);
+        else reject(new Error(event.data.error || 'Fallback returned no photo'));
+      };
+    });
+    assert(blob.type === 'image/webp', 'Fallback output is not WebP');
+    const bitmap = await createImageBitmap(blob);
+    try { assert(bitmap.width === 96 && bitmap.height === 48, 'Fallback WebP could not be decoded at the expected size'); }
+    finally { bitmap.close(); }
+  } finally { worker.terminate(); }
+});
 async function optimize(source: Blob, width?: number, height?: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);

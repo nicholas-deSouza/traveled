@@ -43,7 +43,7 @@ it('explains browser incompatibility and quota pauses', () => {
   mock.snapshot.compatible = false;
   mock.snapshot.items = [item({ pause_reason: 'quota' })];
   mount();
-  expect(screen.getByRole('alert')).toHaveTextContent('Web Locks');
+  expect(screen.getByRole('alert')).toHaveTextContent('Update your browser');
   expect(screen.getByText(/verification allowance resets/)).toBeInTheDocument();
 });
 it('hides canceled uploads and the empty queue', () => {

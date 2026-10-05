@@ -252,7 +252,7 @@ describe('in-flight connectivity and repeated retry flows', () => {
     expect(dependencies.process).toHaveBeenCalledTimes(kind === 'candidate' ? 3 : 0);
   });
 });
-describe('browser WebP capability check', () => {
+describe('browser canvas capability check', () => {
   function probeHarness(type = 'image/webp', contextAvailable = true) {
     const draw = vi.fn();
     class ProbeCanvas {
@@ -286,11 +286,17 @@ describe('browser WebP capability check', () => {
     expect(manager.getSnapshot().error).toBeNull();
     expect(dependencies.api.request).toHaveBeenCalledWith({ action: 'list' });
   });
-  it.each([['image/png', true], ['image/webp', false]])('blocks uploads when encoding returns %s and context availability is %s', async (type, contextAvailable) => {
-    const { manager, dependencies } = probeHarness(type, contextAvailable);
+  it('allows Safari canvas support without requiring native WebP encoding', async () => {
+    const { manager, dependencies } = probeHarness('image/png');
+    manager.start(); await flush();
+    expect(manager.getSnapshot().compatible).toBe(true);
+    expect(dependencies.api.request).toHaveBeenCalledWith({ action: 'list' });
+  });
+  it('blocks uploads when the 2D canvas context is unavailable', async () => {
+    const { manager, dependencies } = probeHarness('image/webp', false);
     manager.start(); await flush();
     expect(manager.getSnapshot().compatible).toBe(false);
-    expect(manager.getSnapshot().error).toContain('cannot encode WebP');
+    expect(manager.getSnapshot().error).toContain('cannot process photos');
     expect(dependencies.api.request).not.toHaveBeenCalled();
   });
 });
