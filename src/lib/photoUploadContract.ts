@@ -13,7 +13,8 @@ export type UploadSubmission = {
   latitude: number | null; longitude: number | null;
   source_sha256: string | null; source_bytes: number | null;
   retry_at: string | null; attempts: number; error: string | null;
-  pause_reason: 'quota' | 'capacity' | 'technical' | null;
+  // Admission and queue pauses are browser feedback from rejected admission requests.
+  pause_reason: 'quota' | 'capacity' | 'admission' | 'queue' | 'technical' | null;
   cleanup_pending: boolean;
 };
 export type UploadTarget = { bucket: 'photo-quarantine'; path: string; generation: number };
