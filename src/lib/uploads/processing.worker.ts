@@ -41,8 +41,13 @@ export async function optimizePhoto(source: Blob): Promise<{ blob: Blob }> {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Your browser cannot process photos.');
     context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
-    const blob = await canvas.convertToBlob({ type: 'image/webp', quality: UPLOAD_LIMITS.quality });
-    if (blob.type !== 'image/webp') throw new Error('Your browser cannot encode WebP photos.');
+    let blob: Blob | undefined;
+    try { blob = await canvas.convertToBlob({ type: 'image/webp', quality: UPLOAD_LIMITS.quality }); }
+    catch { /* Fall back to the bundled encoder when native encoding fails. */ }
+    if (blob?.type !== 'image/webp') {
+      const { encodeWebp } = await import('./webpEncoder');
+      blob = await encodeWebp(context.getImageData(0, 0, dimensions.width, dimensions.height));
+    }
     if (blob.size > UPLOAD_LIMITS.candidateBytes) throw new Error('The optimized photo exceeds 8 MiB. Choose a smaller photo.');
     return { blob };
   } finally { bitmap.close(); }

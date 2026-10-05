@@ -11,6 +11,7 @@ export type UploadMetadata = {
 export interface MetadataStore {
   list(): Promise<UploadMetadata[]>;
   put(value: UploadMetadata): Promise<void>;
+  remove(id: string): Promise<void>;
   clear(): Promise<void>;
   close?(): void;
 }
@@ -34,6 +35,7 @@ export function createMetadataStore(userId: string): MetadataStore {
   return {
     list: () => operation('readonly', (store) => store.getAll()),
     put: async (value) => { await operation('readwrite', (store) => store.put(value)); },
+    remove: async (id) => { await operation('readwrite', (store) => store.delete(id)); },
     clear: async () => { await operation('readwrite', (store) => store.clear()); },
     close: () => { void database.then((db) => db.close()).catch(() => undefined); },
   };

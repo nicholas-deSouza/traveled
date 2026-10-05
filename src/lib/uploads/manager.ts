@@ -11,7 +11,7 @@ export function createUploadManager(userId: string, dependencies: Partial<Manage
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const compatible = dependencies.compatible ?? isUploadCompatible();
-  let snapshot: UploadSnapshot = { items: [], compatible, error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and WebP canvas support. Use a current supported browser.' };
+  let snapshot: UploadSnapshot = { items: [], compatible, error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and canvas support. Use a current supported browser.' };
   const emit = () => { for (const listener of listeners) listener(); };
   const active = () => { if (!running) throw new Error('The upload queue has stopped.'); return running; };
   return {

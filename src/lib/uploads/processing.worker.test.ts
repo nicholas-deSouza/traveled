@@ -3,16 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { optimizePhoto } from './processing.worker';
 
 const heif = vi.hoisted(() => ({ initialize: vi.fn() }));
+const fallback = vi.hoisted(() => ({ encodeWebp: vi.fn() }));
+vi.mock('./webpEncoder', () => fallback);
 vi.mock('./heicDecoder', () => ({ initializeHeicDecoder: heif.initialize }));
 const jpeg = () => new Blob([new Uint8Array([255, 216, 255])], { type: 'image/jpeg' });
 const heic = () => new Blob([new Uint8Array([0, 0, 0, 24, ...new TextEncoder().encode('ftypheic')])]);
 let bitmap: { width: number; height: number; close: ReturnType<typeof vi.fn> };
-let draw: ReturnType<typeof vi.fn>, encode: ReturnType<typeof vi.fn>;
+let draw: ReturnType<typeof vi.fn>, encode: ReturnType<typeof vi.fn>, getImageData: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.stubGlobal('Blob', NodeBlob);
   bitmap = { width: 3200, height: 1600, close: vi.fn() };
   draw = vi.fn(); encode = vi.fn(async () => new Blob(['candidate'], { type: 'image/webp' }));
+  fallback.encodeWebp.mockReset().mockResolvedValue(new Blob(['wasm candidate'], { type: 'image/webp' }));
+  getImageData = vi.fn((x, y, width, height) => new ImageData(width, height));
   vi.stubGlobal('createImageBitmap', vi.fn(async () => bitmap));
   vi.stubGlobal('ImageData', class {
     data: Uint8ClampedArray;
@@ -20,7 +24,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('OffscreenCanvas', class {
     constructor(public width: number, public height: number) {}
-    getContext() { return { drawImage: draw }; }
+    getContext() { return { drawImage: draw, getImageData }; }
     convertToBlob = encode;
   });
 });
@@ -45,13 +49,32 @@ describe('actual photo-processing implementation', () => {
     expect(createImageBitmap).toHaveBeenCalledWith(expect.any(Blob), { imageOrientation: 'from-image' });
     expect(draw).toHaveBeenCalledWith(bitmap, 0, 0, 2560, 1280);
     expect(encode).toHaveBeenCalledWith({ type: 'image/webp', quality: 0.8 });
+    expect(fallback.encodeWebp).not.toHaveBeenCalled();
     expect(bitmap.close).toHaveBeenCalledOnce();
   });
-  it.each(['image/png', 'oversized'] as const)('rejects unsupported encoding result %s and releases the bitmap', async type => {
-    encode.mockResolvedValue(type === 'oversized'
-      ? new Blob([new Uint8Array(8 * 1024 * 1024 + 1)], { type: 'image/webp' })
-      : new Blob(['fallback'], { type }));
-    await expect(optimizePhoto(jpeg())).rejects.toThrow(type === 'oversized' ? '8 MiB' : 'encode WebP');
+  it.each(['png', 'throws'] as const)('uses resized pixels in the fallback when native encoding %s', async failure => {
+    if (failure === 'png') encode.mockResolvedValue(new Blob(['fallback'], { type: 'image/png' }));
+    else encode.mockRejectedValue(new Error('EncodingError'));
+    const result = await optimizePhoto(jpeg());
+    expect(result.blob.type).toBe('image/webp');
+    expect(getImageData).toHaveBeenCalledWith(0, 0, 2560, 1280);
+    expect(fallback.encodeWebp).toHaveBeenCalledWith(expect.objectContaining({ width: 2560, height: 1280 }));
+    expect(bitmap.close).toHaveBeenCalledOnce();
+  });
+  it.each(['native', 'fallback'] as const)('rejects oversized %s output and releases the bitmap', async encoder => {
+    const oversized = new Blob([new Uint8Array(8 * 1024 * 1024 + 1)], { type: 'image/webp' });
+    if (encoder === 'native') encode.mockResolvedValue(oversized);
+    else {
+      encode.mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
+      fallback.encodeWebp.mockResolvedValue(oversized);
+    }
+    await expect(optimizePhoto(jpeg())).rejects.toThrow('8 MiB');
+    expect(bitmap.close).toHaveBeenCalledOnce();
+  });
+  it('propagates fallback failures and releases the bitmap', async () => {
+    encode.mockResolvedValue(new Blob(['png'], { type: 'image/png' }));
+    fallback.encodeWebp.mockRejectedValue(new Error('Encoder unavailable'));
+    await expect(optimizePhoto(jpeg())).rejects.toThrow('Encoder unavailable');
     expect(bitmap.close).toHaveBeenCalledOnce();
   });
   it('rejects decoded dimensions above the pixel limit and closes the bitmap', async () => {

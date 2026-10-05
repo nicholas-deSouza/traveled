@@ -35,7 +35,7 @@ export function PhotoUploadQueue() {
   if (!visibleItems.length && !snapshot.error && snapshot.compatible) return null;
   return <Card className="my-6 p-5" aria-labelledby="photo-upload-heading">
     <h2 id="photo-upload-heading" className="font-display text-2xl">Photo uploads</h2>
-    {!snapshot.compatible && <p role="alert" className="mt-2">This browser cannot safely coordinate photo uploads. Use a browser with Web Locks, BroadcastChannel, IndexedDB, and worker WebP encoding.</p>}
+    {!snapshot.compatible && <p role="alert" className="mt-2">This browser cannot safely coordinate photo uploads. Update your browser to a current version and try again.</p>}
     {(actionError || snapshot.error) && <p role="alert" className="mt-2 text-red-700">{actionError || snapshot.error}</p>}
     {visibleItems.length > 0 && <>
       <p role="status" className="mt-2 text-sm">{unfinished.length} awaiting completion. Photos appear after both verification checks.</p>

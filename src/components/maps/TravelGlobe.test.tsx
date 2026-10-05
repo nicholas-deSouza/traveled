@@ -202,5 +202,5 @@ it('renders font-independent cluster counts and opens groups with the keyboard a
   cluster.focus();
   await userEvent.keyboard(' ');
   expect(screen.getByRole('dialog')).toBeInTheDocument();
-  expect(screen.getByText('Numbered circles group photos across locations. Select one to explore.')).toHaveClass('pointer-events-none');
+  expect(screen.getByText('Numbered circles group photos at the same location. Select one to explore.')).toHaveClass('pointer-events-none');
 });

@@ -60,7 +60,7 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   const checked = new Set<string>();
   const running = new Map<string, AbortController>();
   const listeners = new Set<() => void>();
-  let snapshot: UploadSnapshot = { items: [], error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and WebP canvas support. Use a current supported browser.', compatible };
+  let snapshot: UploadSnapshot = { items: [], error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and canvas support. Use a current supported browser.', compatible };
   const emit = () => {
     if (lifetime.signal.aborted) return;
     snapshot = { ...snapshot, items: [...items.values()].filter(item => !item.outcome || !metadata.get(item.id)?.dismissed) };
@@ -303,6 +303,18 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
     }
     const response = await request({ action: 'list' });
     for (const submission of response.submissions ?? []) await save(submission);
+    // Match the server's seven-day finished-result window. Reconcile first so
+    // unfinished recovery and pending cleanup are never discarded from stale data.
+    const cutoff = Date.now() - UPLOAD_LIMITS.expiryDays * 86400000;
+    for (const [id, value] of metadata) {
+      if (lifetime.signal.aborted) throw new StoppedUpload();
+      const submission = value.submission;
+      if (!submission.outcome || submission.cleanup_pending || Date.parse(submission.created_at) > cutoff
+        || !Number.isFinite(Date.parse(submission.created_at))) continue;
+      await deps.store.remove(id);
+      metadata.delete(id); items.delete(id); files.delete(id); targets.delete(id); checked.delete(id);
+    }
+    emit();
     return [...items.values()].filter((item) => !item.outcome && item.local_status !== 'failed').map((item) => item.id);
   }
   async function lead() {
@@ -329,10 +341,10 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
         const context = canvas.getContext('2d');
         if (!context) throw new Error('Canvas processing is unavailable.');
         context.fillRect(0, 0, 1, 1);
-        const probe = await canvas.convertToBlob({ type: 'image/webp' });
-        if (probe.type !== 'image/webp') throw new Error('WebP encoding is unavailable.');
+        // Safari uses the bundled WebP encoder in the worker. Only canvas
+        // processing is required here; native WebP encoding is optional.
       } catch {
-        snapshot = { ...snapshot, compatible: false, error: 'Your browser cannot encode WebP photos. Use a current supported browser.' };
+        snapshot = { ...snapshot, compatible: false, error: 'Your browser cannot process photos. Use a current supported browser.' };
         emit(); return;
       }
     }
@@ -462,5 +474,5 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   };
   function activeCount() { return [...items.values()].filter((item) => !item.outcome && item.local_status !== 'failed' && item.pause_reason !== 'technical').length; }
 }
-const unavailableStore: MetadataStore = { list: async () => [], put: async () => undefined, clear: async () => undefined };
+const unavailableStore: MetadataStore = { list: async () => [], put: async () => undefined, remove: async () => undefined, clear: async () => undefined };
 const unavailableChannel = { close() {}, postMessage() {}, onmessage: null } as unknown as BroadcastChannel;
