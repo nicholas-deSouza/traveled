@@ -120,9 +120,9 @@ Enable the pre-commit hook in each clone with:
 git config --local core.hooksPath .githooks
 ```
 
-The hook first installs the classifier's locked dependencies with
-`npm ci --prefix infrastructure/photo-classifier --include=optional`, then runs
-`pnpm test`. Installation or test failures block commits. It tests the current
+The hook reuses the classifier's working locked dependencies, installing them with
+`npm ci --prefix infrastructure/photo-classifier --include=optional` only when
+missing, outdated, or broken, then runs `pnpm test`. Installation or test failures block commits. It tests the current
 working tree. Database policy tests above are separate integration tests requiring
 a disposable PostgreSQL database.
 ## Shared home globe

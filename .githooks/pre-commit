@@ -1,13 +1,15 @@
 #!/bin/sh
 set -eu
 cd "$(git rev-parse --show-toplevel)"
-# The root pnpm install does not install the classifier's separate package.
-printf '%s\n' '[pre-commit] Installing locked classifier dependencies, including native image support.' >&2
-install_status=0
-npm ci --prefix infrastructure/photo-classifier --include=optional || install_status=$?
-if [ "$install_status" -ne 0 ]; then
-  printf '%s\n' '[pre-commit] Classifier dependency installation failed. Fix the install before committing.' >&2
-  exit "$install_status"
+# Reuse a working locked install so offline commits do not contact the registry.
+if ! node scripts/check-classifier-dependencies.mjs; then
+  printf '%s\n' '[pre-commit] Installing missing or outdated classifier dependencies, including native image support.' >&2
+  install_status=0
+  npm ci --prefix infrastructure/photo-classifier --include=optional || install_status=$?
+  if [ "$install_status" -ne 0 ]; then
+    printf '%s\n' '[pre-commit] Classifier dependency installation failed. Fix the install before committing.' >&2
+    exit "$install_status"
+  fi
 fi
 # Run the full local suite, including the component/test pairing check.
 printf '%s\n' '[pre-commit] Running the full local test suite.' >&2
