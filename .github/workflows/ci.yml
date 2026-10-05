@@ -73,6 +73,7 @@ jobs:
           supabase start --workdir "$RUNNER_TEMP/upload-ci" >/dev/null
       - name: Apply schema and run SQL/Storage assertions
         run: |
+          set -euo pipefail
           set +x
           status_json=$(supabase status --workdir "$RUNNER_TEMP/upload-ci" --output json)
           export UPLOAD_TEST_URL=$(jq -r .API_URL <<< "$status_json")
@@ -82,8 +83,12 @@ jobs:
           echo "::add-mask::$UPLOAD_TEST_ANON_KEY"
           db_url=$(jq -r .DB_URL <<< "$status_json")
           node scripts/prepare-fresh-schema.mjs | psql "$db_url" -v ON_ERROR_STOP=1 >/dev/null
+          psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/groups.sql >/dev/null
+          psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/trip_colors.sql >/dev/null
+          psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/account_security.sql >/dev/null
           psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload.sql >/dev/null
           psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload_pgmq.sql >/dev/null
+          node scripts/check-account-security.mjs
           psql "$db_url" -v ON_ERROR_STOP=1 -c 'update upload_private.settings set admission_enabled=true' >/dev/null
           node scripts/check-upload-storage.mjs
       - name: Stop disposable services
@@ -112,3 +117,10 @@ jobs:
             -v "$PWD/infrastructure/photo-classifier/dist/lambda:/artifact" \
             public.ecr.aws/sam/build-nodejs24.x \
             /workspace/infrastructure/photo-classifier/build-artifact.mjs /artifact
+      - name: Require complete HEIC corpus compatibility on packaged Linux Node24
+        run: |
+          docker run --rm --platform linux/amd64 --entrypoint node \
+            -v "$PWD:/workspace:ro" \
+            -v "$PWD/infrastructure/photo-classifier/dist/lambda:/artifact:ro" \
+            public.ecr.aws/sam/build-nodejs24.x \
+            /workspace/infrastructure/photo-classifier/test/heic-corpus.mjs /artifact --require-crop --fixtures /workspace/infrastructure/photo-classifier/test/fixtures/heic

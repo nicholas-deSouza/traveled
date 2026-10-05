@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { InvalidImage, ORIGINAL_LIMIT, CANDIDATE_LIMIT, PIXEL_LIMIT, type PreparedImage } from './classifier.ts';
 
 const require = createRequire(import.meta.url);
@@ -75,17 +75,20 @@ type HeifImage = {
   display(image: { data: Uint8ClampedArray; width: number; height: number }, callback: (result: { data: Uint8ClampedArray; width: number; height: number } | null) => void): void;
 };
 export type HeifModule = {
-  HeifDecoder: new () => { decoder: number | null; decode(bytes: Uint8Array): HeifImage[] };
-  heif_js_context_get_list_of_top_level_image_IDs(context: number): number[];
-  heif_context_free(context: number): void;
+  HeifDecoder: new () => { decoder: object | number | null; decode(bytes: Uint8Array): HeifImage[] };
+  heif_js_context_get_list_of_top_level_image_IDs(context: object | number): number[];
+  heif_context_free(context: object | number): void;
 };
 let heifModule: Promise<HeifModule> | undefined;
 async function heif() {
-  // libheif-js/wasm reads a relative cwd path; initialize its factory with absolute packaged WASM instead.
+  // Source and compiled artifact retain the same relative vendor layout. Supply
+  // bytes explicitly: the factory must never resolve WASM from the process cwd.
   heifModule ??= (async () => {
-    const root = dirname(require.resolve('libheif-js/package.json'));
-    const factory = require(join(root, 'libheif-wasm/libheif.js'));
-    return await factory({ wasmBinary: await readFile(join(root, 'libheif-wasm/libheif.wasm')) }) as HeifModule;
+    const root = new URL('../../../vendor/libheif-1.23.5/', import.meta.url);
+    const factory = require(fileURLToPath(new URL('libheif.cjs', root)));
+    const library = await factory({ wasmBinary: await readFile(new URL('libheif.wasm', root)) });
+    if (library.heif_get_version() !== '1.23.5') throw new InvalidImage('Invalid HEIC decoder version');
+    return library as HeifModule;
   })();
   return heifModule;
 }

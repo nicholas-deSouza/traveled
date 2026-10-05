@@ -4,6 +4,7 @@ import type { UploadSubmission } from '../photoUploadContract';
 export type UploadMetadata = {
   submission: UploadSubmission; admissionRequest: string; candidateRequest: string | null;
   originalAcknowledged: boolean;
+  dismissed?: boolean;
   localFailed?: boolean; localError?: string | null;
   localFailureGeneration?: number; localFailureStage?: UploadSubmission['phase'];
 };

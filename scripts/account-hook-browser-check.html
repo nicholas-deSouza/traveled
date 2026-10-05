@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Signup hook check</title></head>
+  <body>
+    <h1>Signup hook check</h1>
+    <p>Run only with approval for the configured Supabase project. This sends one synthetic, overlong email signup probe. No password, personal data, or backend key is used.</p>
+    <button id="run" type="button">Run signup hook probe</button>
+    <p id="result" role="status">Not run</p>
+    <script type="module">
+      import { supabase } from '../src/lib/supabase';
+      import { probeAccountHook } from './account-hook-probe.mjs';
+      const button = document.getElementById('run');
+      const result = document.getElementById('result');
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        result.textContent = 'Checking…';
+        try {
+          if (!supabase) throw new Error('Supabase is not configured.');
+          result.textContent = await probeAccountHook(supabase.auth);
+        } catch (error) { result.textContent = `FAIL: ${error.message}`; }
+        finally { button.disabled = false; }
+      });
+    </script>
+  </body>
+</html>

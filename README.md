@@ -62,7 +62,9 @@ Every group member can view and contribute photos to that group’s trips. Photo
 
 The login, magic-link and recovery forms validate email syntax and reject emoji-containing identifiers before calling Auth, including when browser validation is bypassed. Passwords are passed unchanged to Auth: SQL-like text remains a credential value, never SQL source. Valid addresses such as `drop.table@example.com` are not rejected merely for containing SQL words.
 
-These form checks do not restrict a direct Supabase Auth API caller. If emoji-free account identifiers are a deployment requirement, enforce the same policy with a server-side [Before User Created Auth hook](https://supabase.com/docs/guides/auth/auth-hooks/before-user-created-hook), and test it through the Auth API. Profile display names currently have no emoji restriction. Confirm hosted email verification, password strength/leaked-password protection, CAPTCHA and rate limits in the project dashboard; the local component suite mocks Auth and cannot verify those settings or email delivery.
+Migration `20261004212122_account_security.sql` adds `auth_private.before_user_created(jsonb)` to enforce the email policy during new-account creation, including direct Auth API requests. Local Supabase enables this [Before User Created Auth hook](https://supabase.com/docs/guides/auth/auth-hooks/before-user-created-hook) through `config.toml`. For hosted Supabase, apply the migration first, then select the function under Authentication → Hooks; verify signup immediately afterward. Existing login and email-change flows are outside this creation hook. Profile display names and password characters remain unrestricted by this policy. Confirm hosted email verification, password strength/leaked-password protection, CAPTCHA and rate limits in the project dashboard; local mocked tests cannot verify those settings or email delivery.
+
+The same migration restricts profile reads to oneself and current shared-group peers, preserving roster names. Test both directions and removal of the last shared membership before deploying. It does not modify upload admission.
 
 ### Shared trips
 
@@ -70,7 +72,7 @@ These form checks do not restrict a direct Supabase Auth API caller. If emoji-fr
 - `/groups/:groupId` lists that group's trips and members. All members can create trips.
 - Owners can generate, replace, copy, and revoke a shared invitation link. Links expire after seven days, support multiple invitees, and grant the `member` role. Only a hash is stored in Postgres. Replacing or revoking a link invalidates previous links without removing existing members.
 - `/join#token=…` requires authentication and an explicit **Join group** action. Reopening a valid invitation as a member is safe and does not duplicate membership.
-- `/trips/:tripId` shows that trip's photos and supports multiple uploads. JPEG, PNG, WebP, and GIF files are accepted up to 20 MB each. An upload failure reports partial progress; select only remaining files to retry.
+- `/trips/:tripId` shows that trip's photos and supports multiple uploads. Still JPEG, PNG, WebP, and single-photo HEIC inputs are supported up to 20 MiB and 50 megapixels. Animated images, GIF and AVIF are rejected. Photos appear only after original and optimized-image verification; failed transfers support bounded retry and recovery.
 - RLS restricts group, membership, trip, photo, and Storage reads to members. Trip creators may update/delete their own trips only while still members; uploaders may delete their own photos/files only while still members. Trip creators can choose a shared trip color; photo uploaders can delete their own photos. Member removal UI is not included yet.
 - Storage paths must match both an existing group and its trip. Photo records must reference a file uploaded by the same user in that trip. Downloads use authenticated requests and temporary browser object URLs rather than public or reusable signed links. Already-downloaded data cannot be recalled from a former member's browser.
 - Without Supabase configuration, the landing page shows setup instructions. Signed-in users open the shared home globe; inaccessible data is never replaced with demo trips.
@@ -79,7 +81,9 @@ These form checks do not restrict a direct Supabase Auth API caller. If emoji-fr
 
 Run `pnpm lint` and `pnpm build` for application changes.
 
-`supabase/tests/groups.sql` exercises invitations, membership isolation, trip creation, photo registration, Storage path validation, and revoked-member mutations. Run it only in a disposable local PostgreSQL database. `supabase/tests/bootstrap.sql` supplies minimal Auth/Storage stand-ins for plain Postgres; do not run that bootstrap in a Supabase project. For example, after creating an empty local database named `traveled_test`:
+`supabase/tests/groups.sql` exercises invitations, membership isolation, trip creation, server-published gallery fixtures, denial of direct client publication, and revoked-member mutations. `supabase/tests/account_security.sql` tests profile privacy, roster joins, Auth-role hook privileges and signup validation under the function owner; it does not impersonate the reserved Auth role. Run these only in disposable databases. The database CI job assembles the full schema and runs these suites, trip-color/upload/queue assertions, and the localhost-only `scripts/check-account-security.mjs` and Storage API gates. The account HTTP gate proves actual hook invocation with its exact custom rejection and uses actual user tokens for enumeration and PostgREST embedded roster names; unrelated service errors cannot count as successful policy enforcement.
+
+`supabase/tests/bootstrap.sql` supplies minimal Auth/Storage stand-ins for plain Postgres; do not run it in a Supabase project. The full upload schema also needs Supabase extensions, so use the CI disposable Supabase environment for full integration coverage. For a compatible disposable database named `traveled_test`:
 
 ```sh
 node scripts/prepare-fresh-schema.mjs > /tmp/traveled-schema.sql
@@ -88,7 +92,7 @@ psql -d traveled_test -v ON_ERROR_STOP=1 -f supabase/tests/bootstrap.sql -f /tmp
 
 The security tests roll back their fixtures. They verify PostgreSQL policies, not Supabase's HTTP Storage service or email delivery. For an end-to-end check on your configured project, create a group as user A, copy its invitation, open it in a separate browser profile as user B, join, create a trip, and upload a photo. Confirm A can see it and an uninvited user C cannot open either the group or trip. Generate a replacement invitation and verify the previous link fails.
 
-EXIF extraction and mapping real uploaded photos remain future work.
+GPS metadata is extracted before optimization and used on the globe. The pinned HEIC crop/padding/rotation/transparency corpus passes locally; packaged Linux and device/live release gates remain pending. See the release-results document.
 
 ## Component tests and pre-commit checks
 
