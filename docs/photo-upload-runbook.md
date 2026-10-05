@@ -4,7 +4,7 @@ The implementation follows [ADR 0002](adr/0002-photo-upload-pipeline.md) and the
 
 Use the [ordered release checklist](photo-upload-release-checklist.md) to execute the gates and record each result. The [2026-10-03 validation record](photo-upload-release-results-2026-10-03.md) distinguishes local checks, deployment evidence, and pending live/device checks. A green deployment is not release acceptance.
 
-For repeatable deployment through GitHub runners, follow [GitHub Actions setup](photo-upload-actions-setup.md). The manual deployment workflow validates the already-applied migration, deploys the classifier and Edge Functions, configures runtime secrets/Vault/Cron, and checks backend health. It leaves admission paused for the live release gates.
+For repeatable deployment through GitHub runners, follow [GitHub Actions setup](photo-upload-actions-setup.md). A push to `main` with deploy-relevant backend changes automatically starts the deployment workflow; documentation-only and unrelated UI changes do not. Manual dispatch remains available for reruns. The workflow validates the already-applied migration, deploys the classifier and Edge Functions, configures runtime secrets/Vault/Cron, and checks backend health. It leaves admission paused for the live release gates.
 
 ## Dependencies and validation gates
 

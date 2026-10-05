@@ -15,14 +15,16 @@ test('documentation and unrelated UI changes skip expensive upload environments'
 test('database, Storage and client upload changes select only the database gate', () => {
   for (const path of ['supabase/migrations/new.sql', 'supabase/config.toml', 'supabase/functions/photo-upload/handler.ts',
     'supabase/tests/photo_upload.sql', 'scripts/check-upload-storage.mjs', 'scripts/prepare-fresh-schema.mjs',
-    'scripts/test-upload-server.mjs', 'src/lib/groups.ts', 'src/lib/uploads/photoUploadApi.ts']) {
+    'scripts/test-upload-server.mjs', 'src/lib/groups.ts', 'src/lib/uploads/photoUploadApi.ts',
+    'scripts/check-account-security.mjs', 'scripts/test-account-security.mjs', 'src/lib/authEmail.ts', 'src/lib/authEmail.test.ts',
+    'scripts/account-hook-probe.mjs', 'scripts/account-hook-browser-check.html', 'scripts/test-account-hook-probe.mjs']) {
     assert.deepEqual(jobsForPaths([path]), { upload_database: true, classifier_artifact: false }, path);
   }
 });
 
 test('classifier code, fixtures and lockfile select its Linux artifact gate', () => {
   for (const path of ['infrastructure/photo-classifier/src/images.ts', 'infrastructure/photo-classifier/package-lock.json',
-    'infrastructure/photo-classifier/template.yaml', 'infrastructure/photo-classifier/test/fixture.heic']) {
+    'infrastructure/photo-classifier/template.yaml', 'infrastructure/photo-classifier/test/fixture.heic', 'scripts/test-heic-release-gate.mjs']) {
     assert.deepEqual(jobsForPaths([path]), { upload_database: false, classifier_artifact: true }, path);
   }
 });
@@ -31,7 +33,8 @@ test('shared contracts, dependency and routing configuration select both gates',
   for (const path of ['src/lib/photoUploadContract.ts', 'package.json', 'pnpm-lock.yaml', '.github/workflows/ci.yml',
     'scripts/ci-upload-changes.mjs', 'scripts/test-ci-upload-changes.mjs', '.github/workflows/deploy-photo-upload.yml',
     'scripts/deploy-photo-upload.mjs', 'scripts/test-deploy-photo-upload.mjs',
-    'scripts/script-diagnostics.mjs', 'scripts/test-script-diagnostics.mjs']) assert.deepEqual(jobsForPaths([path]), both, path);
+    'scripts/script-diagnostics.mjs', 'scripts/test-script-diagnostics.mjs',
+    'vendor/libheif-1.23.5/libheif.wasm', 'vendor/libheif-1.23.5/provenance.json']) assert.deepEqual(jobsForPaths([path]), both, path);
   assert.deepEqual(jobsForPaths(['supabase/tests/photo_upload.sql', 'infrastructure/photo-classifier/src/images.ts']), both);
 });
 

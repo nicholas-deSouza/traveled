@@ -5,10 +5,11 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node stage-vendor.mjs dist",
     "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "test:heic:corpus": "node test/heic-corpus.mjs --require-crop --fixtures test/fixtures/heic",
     "smoke": "npm run build && node test/artifact-smoke.mjs"
   },
-  "dependencies": { "sharp": "0.35.5", "libheif-js": "1.23.2" },
+  "dependencies": { "sharp": "0.35.5" },
   "devDependencies": { "@types/node": "24.10.1", "typescript": "5.7.3" }
 }

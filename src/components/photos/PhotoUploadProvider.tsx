@@ -5,6 +5,10 @@ import { notifyPhotoChanged } from '../../lib/photoChanges';
 import { PhotoUploadQueue } from './PhotoUploadQueue';
 
 export function PhotoUploadProvider({ userId, children }: { userId: string; children: ReactNode }) {
+  return <AccountPhotoUploadProvider key={userId} userId={userId}>{children}</AccountPhotoUploadProvider>;
+}
+
+function AccountPhotoUploadProvider({ userId, children }: { userId: string; children: ReactNode }) {
   const [manager] = useState(() => createUploadManager(userId));
   useEffect(() => {
     manager.start();

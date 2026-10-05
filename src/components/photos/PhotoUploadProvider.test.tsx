@@ -5,12 +5,14 @@ import { PHOTO_CHANGED_EVENT } from '../../lib/photoChanges';
 import type { UploadSubmission } from '../../lib/photoUploadContract';
 import { MemoryRouter, Link, Routes, Route } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
+import { createUploadManager } from '../../lib/uploads/manager';
+import { useUploadManager } from '../../lib/useUploadManager';
 
 const mock = vi.hoisted(() => ({ stop: vi.fn(), start: vi.fn(), listener: () => {}, items: [] as UploadSubmission[] }));
-vi.mock('../../lib/uploads/manager', () => ({ createUploadManager: () => ({
+vi.mock('../../lib/uploads/manager', () => ({ createUploadManager: vi.fn(() => ({
   start: mock.start, stop: mock.stop, getSnapshot: () => ({ items: mock.items }),
   subscribe: (listener: () => void) => { mock.listener = listener; return vi.fn(); },
-}) }));
+})) }));
 vi.mock('./PhotoUploadQueue', () => ({ PhotoUploadQueue: () => <p>Upload controls</p> }));
 
 it('keeps route content and controls mounted and stops account work on unmount', () => {
@@ -40,4 +42,25 @@ it('preserves account work while navigating between trips', async () => {
   expect(screen.getByText('Rome trip')).toBeInTheDocument();
   expect(mock.start).toHaveBeenCalledOnce();
   expect(mock.stop).not.toHaveBeenCalled();
+});
+
+it('replaces the context and stops the old manager when the signed-in account changes', () => {
+  const first = { start: vi.fn(), stop: vi.fn(), getSnapshot: () => ({ items: [] }), subscribe: vi.fn(() => vi.fn()) };
+  const second = { ...first, start: vi.fn(), stop: vi.fn() };
+  vi.mocked(createUploadManager)
+    .mockReturnValueOnce(first as unknown as ReturnType<typeof createUploadManager>)
+    .mockReturnValueOnce(second as unknown as ReturnType<typeof createUploadManager>);
+  const seen: unknown[] = [];
+  function Consumer() { seen.push(useUploadManager()); return <p>Trip</p>; }
+  const { rerender, unmount } = render(<PhotoUploadProvider userId="first"><Consumer /></PhotoUploadProvider>);
+  expect(seen.at(-1)).toBe(first);
+  rerender(<PhotoUploadProvider userId="second"><Consumer /></PhotoUploadProvider>);
+  expect(seen.at(-1)).toBe(second);
+  expect(first.stop).toHaveBeenCalledOnce();
+  expect(second.start).toHaveBeenCalledOnce();
+  expect(second.stop).not.toHaveBeenCalled();
+  expect(createUploadManager).toHaveBeenNthCalledWith(1, 'first');
+  expect(createUploadManager).toHaveBeenNthCalledWith(2, 'second');
+  unmount();
+  expect(second.stop).toHaveBeenCalledOnce();
 });

@@ -109,10 +109,10 @@ export function TravelGlobe({ trips, photos }: Atlas) {
           // misleadingly place that photo at the cluster's averaged center.
           if (feature.properties.cluster) {
             const coordinates = feature.geometry.coordinates.slice(0, 2) as [number, number];
-            const point = map.project(coordinates);
+            const position = map.project(coordinates);
             const clusterId = Number(feature.properties.cluster_id);
-            visibleClusters.set(`${id}-${clusterId}`, { title: trip.title, tripId: trip.id,
-              count: Number(feature.properties.count), coordinates, x: point.x, y: point.y, clusterId, sourceId: id, color: tripColor(trip) });
+            const key = `${id}-cluster-${clusterId}`;
+            visibleClusters.set(key, { coordinates, title: trip.title, tripId: trip.id, color: tripColor(trip), count: Number(feature.properties.point_count ?? feature.properties.count), x: position.x, y: position.y, sourceId: id, clusterId });
             continue;
           }
           if (map.getZoom() < 5) continue;
@@ -195,9 +195,9 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     map.on("style.load", () => {
       map.setProjection({ type: "globe" });
       for (const { trip, id, points } of datasets) {
-        map.addSource(id, { type: 'geojson', data: points.data, cluster: true, clusterRadius: 80, clusterMaxZoom: 14,
-          clusterProperties: { count: ['+', ['get', 'count']], representative: ['min', ['get', 'representative']] },
-        });
+        // Screen-space clustering can merge different cities into a misleading
+        // midpoint. photoPoints already groups only identical coordinates.
+        map.addSource(id, { type: 'geojson', data: points.data, cluster: false });
         map.addLayer({ id, type: 'circle', source: id, paint: {
           'circle-radius': ['case', ['has', 'point_count'], 18, 7], 'circle-color': tripColor(trip),
           'circle-stroke-color': '#fff', 'circle-stroke-width': 2,

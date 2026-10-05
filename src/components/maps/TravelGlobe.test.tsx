@@ -9,9 +9,11 @@ const map = vi.hoisted(() => ({
   addControl: vi.fn(), on: vi.fn(), off: vi.fn(), setProjection: vi.fn(),
   addSource: vi.fn(), addLayer: vi.fn(), remove: vi.fn(),
   project: vi.fn(() => ({ x: 120, y: 160 })),
+  isStyleLoaded: vi.fn(() => true), getZoom: vi.fn(() => 1.15),
+  getLayer: vi.fn(() => ({})), queryRenderedFeatures: vi.fn(() => [] as unknown[]),
   getSource: vi.fn(), easeTo: vi.fn(),
-  isStyleLoaded: vi.fn(() => true), getZoom: vi.fn(() => 6), getLayer: vi.fn(() => true), queryRenderedFeatures: vi.fn(),
 }));
+vi.mock('../../lib/groups', () => ({ downloadPhoto: vi.fn(async () => new Blob(['thumbnail'])) }));
 vi.mock('maplibre-gl', () => ({ default: {
   Map: vi.fn(function () { return map; }), NavigationControl: vi.fn(),
 } }));
@@ -23,6 +25,12 @@ beforeEach(() => {
   // Keep animation frames deterministic; these tests exercise map setup and UI.
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  map.getZoom.mockReturnValue(1.15);
+  map.queryRenderedFeatures.mockReturnValue([]);
+  vi.stubGlobal('URL', class extends URL {
+    static createObjectURL = vi.fn(() => 'blob:thumbnail');
+    static revokeObjectURL = vi.fn();
+  });
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -33,7 +41,7 @@ it('plots located photos per trip and releases map resources on unmount', () => 
   act(() => onLoad());
   expect(map.setProjection).toHaveBeenCalledWith({ type: 'globe' });
   expect(map.addSource).toHaveBeenCalledWith('trip-paris', expect.objectContaining({
-    cluster: true,
+    cluster: false,
     data: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { count: 1, representative: 0 }, geometry: { type: 'Point', coordinates: [2.3522, 48.8566] } }] },
   }));
   expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({
@@ -44,6 +52,48 @@ it('plots located photos per trip and releases map resources on unmount', () => 
   expect(map.off).toHaveBeenCalledWith('render', expect.any(Function));
   expect(media.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function));
   expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+});
+
+it('keeps Los Angeles and San Francisco independent while grouping identical photo coordinates', () => {
+  const photos = [
+    { ...parisPhoto, id: 'la-one', latitude: 34.0522, longitude: -118.2437 },
+    { ...parisPhoto, id: 'la-two', latitude: 34.0522, longitude: -118.2437 },
+    { ...parisPhoto, id: 'sf', latitude: 37.7749, longitude: -122.4194 },
+  ];
+  render(<MemoryRouter><TravelGlobe trips={[parisTrip]} photos={photos} /></MemoryRouter>);
+  act(() => map.on.mock.calls.find(([event]) => event === 'style.load')![1]());
+  expect(map.addSource).toHaveBeenCalledWith('trip-paris', {
+    type: 'geojson', cluster: false,
+    data: { type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: { count: 2, representative: 0 }, geometry: { type: 'Point', coordinates: [-118.2437, 34.0522] } },
+      { type: 'Feature', properties: { count: 1, representative: 2 }, geometry: { type: 'Point', coordinates: [-122.4194, 37.7749] } },
+    ] },
+  });
+});
+
+it('renders independent city thumbnails at close zoom, deduplicates tile features, and hides them when zooming out', async () => {
+  const photos = [
+    { ...parisPhoto, id: 'la', storage_path: 'la.webp', latitude: 34.0522, longitude: -118.2437 },
+    { ...parisPhoto, id: 'sf', storage_path: 'sf.webp', latitude: 37.7749, longitude: -122.4194 },
+  ];
+  render(<MemoryRouter><TravelGlobe trips={[parisTrip]} photos={photos} /></MemoryRouter>);
+  act(() => map.on.mock.calls.find(([event]) => event === 'style.load')![1]());
+  const renderMap = map.on.mock.calls.find(([event]) => event === 'render')![1];
+  const la = { geometry: { type: 'Point', coordinates: [-118.2437, 34.0522] }, properties: { count: 1, representative: 0 } };
+  const sf = { geometry: { type: 'Point', coordinates: [-122.4194, 37.7749] }, properties: { count: 1, representative: 1 } };
+  map.getZoom.mockReturnValue(5);
+  map.queryRenderedFeatures.mockReturnValue([la, sf, la]);
+  await act(async () => renderMap());
+  const markers = screen.getAllByRole('link', { name: 'Paris: 1 photos. Open trip' });
+  expect(markers).toHaveLength(2);
+  expect(markers[0].style.transform).not.toBe(markers[1].style.transform);
+  expect(map.project).toHaveBeenCalledWith([-118.2437, 34.0522]);
+  expect(map.project).toHaveBeenCalledWith([-122.4194, 37.7749]);
+  expect(screen.getAllByRole('presentation')).toHaveLength(2);
+  map.getZoom.mockReturnValue(4.99);
+  act(() => renderMap());
+  expect(screen.queryByRole('link', { name: 'Paris: 1 photos. Open trip' })).not.toBeInTheDocument();
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
 });
 
 it('opens an accessible trip popup and returns focus to the globe on close', async () => {
@@ -111,10 +161,12 @@ it('keeps failed expansion recoverable and avoids moving after the popup closes'
 });
 
 it('does not place a representative photo thumbnail at an averaged cluster location', () => {
+  map.getZoom.mockReturnValue(5);
   map.queryRenderedFeatures.mockReturnValue([{ geometry: { type: 'Point', coordinates: [2, 48] }, properties: { count: 3, cluster: true, cluster_id: 42, representative: 0 } }]);
   render(<MemoryRouter><TravelGlobe {...atlas} /></MemoryRouter>);
   act(() => map.on.mock.calls.find(([event]) => event === 'render')![1]());
   expect(screen.queryByRole('link', { name: /photos. Open trip/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Paris: 3 photos across grouped locations. Explore group' })).toHaveTextContent('3');
 });
 
 it('keeps a newer expansion loading when an older request settles', async () => {
