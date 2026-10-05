@@ -23,6 +23,29 @@ it('switches to magic links and displays delivery confirmation', async () => {
   await userEvent.type(screen.getByLabelText('Email'), 'traveler@example.com');
   await userEvent.click(screen.getByRole('button', { name: 'Send magic link' }));
   expect(await screen.findByRole('status')).toHaveTextContent('Check your email');
+  expect(auth.signInWithOtp).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({ shouldCreateUser: false }) }));
+});
+
+it('asks new users for a name and sends it with signup metadata', async () => {
+  auth.signInWithOtp.mockResolvedValue({ error: null });
+  render(<MemoryRouter><LoginPage /></MemoryRouter>);
+  await userEvent.click(screen.getByRole('button', { name: 'Create an account' }));
+  expect(screen.getByLabelText('Your name')).toBeRequired();
+  await userEvent.type(screen.getByLabelText('Your name'), 'José García');
+  await userEvent.type(screen.getByLabelText('Email'), 'new@example.com');
+  await userEvent.click(screen.getByRole('button', { name: 'Send signup link' }));
+  expect(auth.signInWithOtp).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@example.com', options: expect.objectContaining({ shouldCreateUser: true, data: { display_name: 'José García' } }) }));
+  expect(await screen.findByRole('status')).toHaveTextContent('Check your email');
+});
+
+it.each(['', 'Fuck You'])('rejects invalid signup names before calling authentication: %s', name => {
+  render(<MemoryRouter><LoginPage /></MemoryRouter>);
+  fireEvent.click(screen.getByRole('button', { name: 'Create an account' }));
+  fireEvent.change(screen.getByLabelText('Your name'), { target: { value: name } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.com' } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Send signup link' }).closest('form')!);
+  expect(screen.getByRole('alert')).toHaveTextContent(name ? 'without explicit words or phrases' : 'Enter a name');
+  expect(auth.signInWithOtp).not.toHaveBeenCalled();
 });
 it('shows authentication failures', async () => {
   auth.signInWithPassword.mockResolvedValue({ error: new Error('Invalid credentials') });

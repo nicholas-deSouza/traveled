@@ -9,6 +9,10 @@ export type Photo = PhotoMetadata & { url: string | null };
 export type AtlasTrip = Trip & { groupName: string; photoCount: number };
 export type Atlas = { trips: AtlasTrip[]; photos: PhotoMetadata[] };
 
+export class GroupAccessError extends Error {
+  constructor() { super('This group is unavailable. You must be a member to open it.'); }
+}
+
 function client() {
   if (!supabase) throw new Error('Connect Supabase to use groups.');
   return supabase;
@@ -38,7 +42,16 @@ export async function loadGroup(id: string) {
     db.from('trips').select('*').eq('group_id', id).order('created_at', { ascending: false }),
     db.from('group_members').select('user_id, role, profiles(display_name)').eq('group_id', id).order('created_at'),
   ]);
-  if (group.error) throw new Error('This group is unavailable. You must be a member to open it.');
+  // A rejected session does not establish that membership was revoked. Check
+  // every response first, including when another query reports no visible row.
+  for (const result of [group, trips, members]) {
+    if (result.status === 401) throw result.error ?? new Error('Your session could not be verified. Please try again.');
+  }
+  for (const result of [group, trips, members]) {
+    if (result.status === 403 || result.error?.code === '42501') throw new GroupAccessError();
+  }
+  if (group.error?.code === 'PGRST116' || (!group.error && !group.data)) throw new GroupAccessError();
+  if (group.error) throw group.error;
   if (trips.error) throw trips.error;
   if (members.error) throw members.error;
   return { group: group.data as Group, trips: trips.data as Trip[], members: members.data as unknown as Member[] };

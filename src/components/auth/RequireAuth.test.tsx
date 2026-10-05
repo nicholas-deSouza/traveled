@@ -1,9 +1,10 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useOutletContext } from 'react-router-dom';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useState, type ReactNode } from 'react';
 import { RequireAuth } from './RequireAuth';
+import { bindInvitation, pendingInvitation, rememberInvitation } from '../../lib/pendingInvitation';
 
 const auth = vi.hoisted(() => ({ getSession: vi.fn(), unsubscribe: vi.fn(), onAuthStateChange: vi.fn() }));
 vi.mock('../../lib/supabase', () => ({ supabase: { auth: {
@@ -14,6 +15,7 @@ vi.mock('../photos/PhotoUploadProvider', () => ({ PhotoUploadProvider: ({ childr
 beforeEach(() => {
   auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: auth.unsubscribe } } });
 });
+afterEach(() => window.localStorage.removeItem('traveled:pending-invitation'));
 function mount() {
   return render(<MemoryRouter initialEntries={['/groups']}><Routes>
     <Route element={<RequireAuth />}><Route path="/groups" element={<p>Private groups</p>} /></Route>
@@ -49,6 +51,34 @@ it('surfaces session errors', async () => {
   auth.getSession.mockRejectedValue(new Error('Session unavailable'));
   mount();
   expect(await screen.findByRole('alert')).toHaveTextContent('Session unavailable');
+});
+
+it.each(['lookup', 'auth event'])('discards another account’s pending invitation during %s', async method => {
+  rememberInvitation(`/join#token=${'a'.repeat(64)}`);
+  bindInvitation('account-a');
+  auth.getSession.mockResolvedValue({ data: { session: { user: { id: method === 'lookup' ? 'account-b' : 'account-a' } } }, error: null });
+  mountAccount();
+  await screen.findByRole('button', { name: method === 'lookup' ? 'account-b: 0' : 'account-a: 0' });
+  if (method === 'auth event') {
+    const notify = auth.onAuthStateChange.mock.calls[0][0];
+    act(() => notify('SIGNED_IN', { user: { id: 'account-b' } }));
+    expect(screen.getByRole('button', { name: 'account-b: 0' })).toBeInTheDocument();
+  }
+  expect(pendingInvitation()).toBeNull();
+});
+
+it('keeps an expired-session invitation associated with the previous account', async () => {
+  rememberInvitation(`/join#token=${'a'.repeat(64)}`);
+  auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'account-a' } } }, error: null });
+  mountAccount();
+  await screen.findByRole('button', { name: 'account-a: 0' });
+  expect(pendingInvitation()).not.toBeNull();
+  const notify = auth.onAuthStateChange.mock.calls[0][0];
+  act(() => notify('SIGNED_OUT', null));
+  expect(await screen.findByText('Login')).toBeInTheDocument();
+  expect(pendingInvitation()).not.toBeNull();
+  bindInvitation('account-b');
+  expect(pendingInvitation()).toBeNull();
 });
 
 it.each(['session', 'anonymous'] as const)('uses INITIAL_SESSION with an %s result before a late session lookup', async result => {
