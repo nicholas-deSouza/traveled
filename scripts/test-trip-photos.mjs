@@ -142,3 +142,41 @@ test('refresh retries unavailable images and replaces changed storage paths', as
   assert.deepEqual(calls.downloads, ['photo-0.jpg', 'photo-1.jpg']);
   assert.equal(data.photos[2].url, 'cached:photo-2');
 });
+
+function locationFixture(error = null) {
+  const calls = [], events = [];
+  const exports = {};
+  const db = { rpc: async (name, args) => { calls.push([name, args]); return { error }; } };
+  vm.runInNewContext(compiled, {
+    exports, require: () => ({ supabase: db }),
+    window: { dispatchEvent: event => events.push(event) },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+  });
+  return { api: exports, calls, events };
+}
+
+test('manual locations use one atomic metadata RPC and notify gallery/atlas only after success', async () => {
+  const { api, calls, events } = locationFixture();
+  await api.updatePhotoLocations('trip', ['one', 'two'], { latitude: 0, longitude: 0 });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [['set_photo_locations', {
+    target_trip_id: 'trip', photo_ids: ['one', 'two'], location_latitude: 0, location_longitude: 0,
+  }]]);
+  assert.equal(events[0].type, 'traveled:photo-changed');
+  assert.equal(events[0].detail.tripId, 'trip');
+});
+
+test('manual location failures surface without emitting a success event or calling upload APIs', async () => {
+  const { api, calls, events } = locationFixture(new Error('Access denied'));
+  await assert.rejects(api.updatePhotoLocations('trip', ['one'], { latitude: 10, longitude: 20 }), /Access denied/);
+  assert.equal(calls.length, 1);
+  assert.equal(events.length, 0);
+});
+
+test('invalid manual location selections and coordinates fail before requesting changes', async () => {
+  const { api, calls } = locationFixture();
+  for (const ids of [[], ['one', 'one'], Array.from({ length: 101 }, (_, index) => String(index))])
+    await assert.rejects(api.updatePhotoLocations('trip', ids, { latitude: 0, longitude: 0 }), /Select/);
+  for (const location of [{ latitude: 91, longitude: 0 }, { latitude: 0, longitude: 181 }, { latitude: NaN, longitude: 0 }, { latitude: null, longitude: 0 }])
+    await assert.rejects(api.updatePhotoLocations('trip', ['one'], location), /valid photo location/);
+  assert.equal(calls.length, 0);
+});

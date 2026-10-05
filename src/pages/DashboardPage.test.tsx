@@ -21,14 +21,14 @@ it('loads the member atlas, passes it to the globe, and links to trip details', 
   expect(loadAtlas).toHaveBeenCalledWith('member');
   expect(vi.mocked(TravelGlobe).mock.calls.at(-1)?.[0]).toEqual(atlas);
   expect(screen.getByText('1 trips · 1 moments')).toBeInTheDocument();
-  expect(screen.queryByText(/No photos with GPS/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/No photo locations yet/)).not.toBeInTheDocument();
 });
 
 it('explains how to start an empty atlas', async () => {
   vi.mocked(loadAtlas).mockResolvedValue({ trips: [], photos: [] });
   render(<MemoryRouter><DashboardPage /></MemoryRouter>);
   expect(await screen.findByText('Join or create a group to start your shared atlas.')).toBeInTheDocument();
-  expect(screen.getByText(/No photos with GPS locations yet/)).toBeInTheDocument();
+  expect(screen.getByText(/No photo locations yet/)).toBeInTheDocument();
 });
 
 it('retries a failed atlas load', async () => {

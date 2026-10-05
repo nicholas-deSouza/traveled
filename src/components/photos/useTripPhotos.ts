@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { errorMessage, loadTripPhotos, releasePhotos, type Photo } from '../../lib/groups';
 import { PHOTO_CHANGED_EVENT } from '../../lib/photoChanges';
+import type { Coordinates } from '../../lib/photoMetadata';
 
 type PhotoPage = Awaited<ReturnType<typeof loadTripPhotos>>;
 
@@ -59,6 +60,13 @@ export function useTripPhotos(tripId: string, page: number) {
   }
 
   const current = result?.key === key ? result : undefined;
+  function locateLocal(ids: string[], coordinates: Coordinates) {
+    const locate = (photo: Photo) => ids.includes(photo.id) ? { ...photo, ...coordinates } : photo;
+    cache.current = cache.current.map(locate);
+    setResult(old => old?.key === key && old.data
+      ? { ...old, data: { ...old.data, photos: old.data.photos.map(locate) } }
+      : old);
+  }
   return {
     data: current?.data,
     error: current?.error,
@@ -66,5 +74,6 @@ export function useTripPhotos(tripId: string, page: number) {
     refreshing: finished !== requestKey,
     reload,
     removeLocal,
+    locateLocal,
   };
 }

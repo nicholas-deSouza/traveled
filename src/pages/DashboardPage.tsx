@@ -38,7 +38,7 @@ export function DashboardPage() {
     <div className="py-5 md:py-8">
       <section className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div><p className="mb-1 text-sm font-medium uppercase tracking-[0.18em] text-ember">The shared atlas</p><h1 className="font-display text-4xl leading-none md:text-6xl">Where we’ve<br />been together.</h1></div>
-        <p className="max-w-xs text-sm leading-6 text-ink/65">Explore your trips and shared memories. Photos with GPS locations appear on the globe.</p>
+        <p className="max-w-xs text-sm leading-6 text-ink/65">Explore your trips and shared memories. Photos with locations appear on the globe.</p>
       </section>
       {loading && <p role="status" className="mb-4">Loading your atlas…</p>}
       {error && <div className="mb-4"><p role="alert">Your atlas could not be loaded. {error}</p><Button variant="outline" onClick={reload}>Retry atlas</Button></div>}
@@ -46,7 +46,7 @@ export function DashboardPage() {
         <TravelGlobe trips={trips} photos={photos} />
         {data && <div className="pointer-events-none absolute inset-x-0 bottom-0 rounded-b-3xl bg-gradient-to-t from-ink/60 to-transparent p-5 text-white"><p className="font-display text-2xl">{trips.length} trips · {photos.length} moments</p></div>}
       </section>
-      {data && !photos.some(hasLocation) && <p className="mt-3 text-sm text-ink/65">No photos with GPS locations yet. All your trips are listed below.</p>}
+      {data && !photos.some(hasLocation) && <p className="mt-3 text-sm text-ink/65">No photo locations yet. Open a trip to add locations to your uploaded photos.</p>}
       <section className="mt-8">
         <div className="mb-4 flex items-center justify-between"><h2 className="font-display text-2xl">Your trips</h2><Link className="text-sm text-moss hover:underline" to="/groups">Your groups</Link></div>
         {data && trips.length === 0 && <p>Join or create a group to start your shared atlas.</p>}

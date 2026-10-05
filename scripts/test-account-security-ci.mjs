@@ -9,7 +9,7 @@ assert.ok(job, 'upload-database job must exist');
 const block = job.match(/ {6}- name: Apply schema and run SQL\/Storage assertions\n {8}run: \|\n((?: {10}[^\n]*\n)+)/)?.[1];
 assert.ok(block, 'database assertion shell block must exist');
 const script = block.replace(/^ {10}/gm, '');
-const suites = ['groups', 'trip_colors', 'account_security', 'photo_upload', 'photo_upload_pgmq'];
+const suites = ['groups', 'trip_colors', 'photo_locations', 'account_security', 'photo_upload', 'photo_upload_pgmq'];
 
 // Execute the actual workflow shell block with command stubs. Empty PATH and
 // a clean environment prevent access to services, credentials or real tools.
