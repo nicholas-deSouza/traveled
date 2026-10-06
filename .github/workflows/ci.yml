@@ -89,6 +89,7 @@ jobs:
           psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/account_security.sql >/dev/null
           psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload.sql >/dev/null
           psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload_pgmq.sql >/dev/null
+          psql "$db_url" -v ON_ERROR_STOP=1 -f supabase/tests/photo_upload_admission.sql >/dev/null
           node scripts/check-account-security.mjs
           psql "$db_url" -v ON_ERROR_STOP=1 -c 'update upload_private.settings set admission_enabled=true' >/dev/null
           node scripts/check-upload-storage.mjs

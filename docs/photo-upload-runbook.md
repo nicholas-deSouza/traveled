@@ -63,6 +63,10 @@ Verify Sightengine's account is on the intended free plan, supports the image-ch
 
 Rollback by disabling admission with the same setting. Leave moderation/publication gates and cleanup workers active. Reopening the old direct-write policies would bypass the accepted moderation boundary.
 
+For subsequent GitHub deployments, apply [the automatic-resume migration](../supabase/migrations/20261005045047_photo_upload_automatic_resume.sql) once, before deploying the updated workflow. It does not change the current admission setting. The workflow builds and validates the classifier before pausing, records the previous switch and its new revision in step outputs, and resumes previously enabled admission only after successful backend verification. Previously disabled admission stays disabled. A switch update during deployment invalidates automatic resume, even when an operator explicitly sets `false` while admission is already paused. Worker/provider updates do not invalidate resume. Workflow outputs are scoped to the current attempt; do not reuse an earlier attempt's state.
+
+The workflow summary reports `resumed`, `kept_paused`, or `operator_override`. A failure or cancellation after the pause and before verification completes leaves admission paused. A failure before the pause leaves its setting unchanged. A retry that starts paused will keep admission paused after success; run recovery/release checks and explicitly enable admission when ready. The backend probes check authorization and scheduling, not a full end-to-end photo upload.
+
 ## Operations and recovery
 
 ### Script diagnostics
@@ -90,9 +94,11 @@ Unresolved submissions expire seven days after creation. Cleanup records survive
 ## Photos paused before upload
 
 If the queue reports `Uploads are paused`, new admission is disabled by the
-operator switch; this does not mean project Storage is full. The deployment
-workflow disables admission and deliberately leaves it disabled for release
-checks. Through trusted SQL Editor access, run:
+operator switch; this does not mean project Storage is full. A failed deployment,
+an existing operator pause, or a switch update during rollout can leave admission
+paused. Successful deployments automatically restore previously enabled admission
+when the pause revision is unchanged. Check the workflow's admission status and,
+through trusted SQL Editor access, run:
 
 ```sql
 select public.upload_health();

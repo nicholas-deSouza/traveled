@@ -6,11 +6,13 @@ The database migration is complete, as reported by the operator. The workflow ch
 
 [Deploy photo upload backend](../.github/workflows/deploy-photo-upload.yml) runs automatically after a push to `main` when deploy-relevant backend paths change: Supabase functions, migrations or config; classifier source/build inputs; deployment scripts; the shared upload contract; or this workflow. Documentation-only and unrelated UI changes do not deploy production. It first runs the full existing CI, including disposable SQL/Storage tests and Linux classifier smoke tests. A manual `workflow_dispatch` run remains available from **Actions → Deploy photo upload backend → Run workflow** and ignores the path filter.
 
-The deployment then pauses new uploads, builds the Node 24 Linux classifier on a GitHub runner, deploys the existing SAM template, reads its Lambda ARN, and checks the dedicated Edge credentials can invoke that function using Lambda DryRun. It sends runtime secrets to Supabase, creates or updates the two named Vault entries, deploys both Edge Functions, probes CORS and authentication, wakes the worker, installs the one-minute Cron schedule, and checks `upload_health()`.
+The deployment builds and smoke-tests the Node 24 Linux classifier and validates the SAM template before pausing uploads. It then checks migration readiness, atomically records the previous admission setting and its pause revision, deploys the existing SAM template, reads its Lambda ARN, and checks the dedicated Edge credentials can invoke that function using Lambda DryRun. It sends runtime secrets to Supabase, creates or updates the two named Vault entries, deploys both Edge Functions, probes CORS and authentication, wakes the worker, installs the one-minute Cron schedule, and checks `upload_health()`.
 
 No local Docker, AWS CLI, SAM CLI, Supabase CLI or database password is required for this workflow. GitHub runners provide those tools. Credentials go from GitHub environment secrets directly into the services through environment variables and HTTPS requests; they are not written into repository files or secret-bearing command arguments. Management API error bodies are omitted from logs.
 
-Every deployment leaves upload admission **paused**, including failed runs. It does not deploy the frontend. Existing jobs and cleanup can continue; the authenticated worker probe can process pending real jobs. DryRun checks invocation permission, not Sightengine classification. The [live release checks](photo-upload-runbook.md) remain necessary before enabling uploads.
+After all backend checks pass, previously enabled admission resumes automatically. Admission that was already disabled stays disabled. An explicit switch update during deployment, including setting an already-paused switch to `false`, changes its revision and prevents the deployment from automatically resuming it. Existing jobs and cleanup continue without changing that revision. The GitHub summary reports `resumed`, `kept_paused`, or `operator_override`.
+
+Failures or cancellations before verification completes leave the deployment pause in place. Failures before the pause leave the switch unchanged. There is no unconditional cleanup step that enables uploads. A rerun starting with paused admission preserves that pause; diagnose the failure and explicitly enable admission after recovery checks. This workflow does not deploy the frontend. DryRun checks invocation permission, not Sightengine classification, and the existing probes do not prove a full photo upload. The [live release checks](photo-upload-runbook.md) remain necessary for the first release and relevant pipeline changes.
 
 ## One-time configuration
 
@@ -51,18 +53,21 @@ The Supabase configuration helper uses the documented [Management API query endp
 
 Once the workflow and associated code are committed, reviewed and present on `main`, a matching backend push starts the deployment automatically. If the workflow needs to be rerun, open **Actions → Deploy photo upload backend → Run workflow**, choose `main`, and run it manually. A required reviewer for the `photo-upload-production` environment must still approve the deployment when configured.
 
-After a green deployment, complete the real HEIC/provider, browser recovery and Storage security release checks in the runbook. Then use trusted Supabase SQL Editor access:
+For routine deployments, check the admission status in the workflow summary and verify a real photo uploads and appears in the gallery. No manual SQL is needed when the status is `resumed`.
+
+For the first release or recovery from a paused deployment, complete the real HEIC/provider, browser recovery and Storage security release checks in the runbook. Then use trusted Supabase SQL Editor access:
 
 ```sql
 update upload_private.settings set admission_enabled = true where singleton;
 select public.upload_health();
 ```
 
-Verify a real photo uploads and appears in the gallery. If rollout fails, leave admission paused and inspect the failing stage. The workflow is repeatable for future backend releases, not just initial setup.
+Verify a real photo uploads and appears in the gallery. If rollout fails, leave admission paused and inspect the failing stage. `operator_override` means the switch changed after this deployment paused it; inspect the current setting and the operator's intent before changing it.
 
 ## Setup checklist
 
 - [x] Apply the initial database migration (operator-reported complete).
+- [ ] Apply [the automatic-resume migration](../supabase/migrations/20261005045047_photo_upload_automatic_resume.sql) before deploying this workflow update. It adds the admission revision and its trigger without changing the admission setting. For the manually migrated project, run the entire file in SQL Editor. The workflow checks for the trigger before pausing or changing services and does not apply migrations.
 - [ ] Apply [the PGMQ compatibility migration](../supabase/migrations/20261002224541_photo_upload_pgmq_compatibility.sql) before retrying deployment. It corrects health and worker checks for the optional fourth `pgmq.read` argument. For the existing manually migrated project, run this new file in SQL Editor, then confirm `select public.upload_health();` reports `queues: true`. The deployment workflow does not apply migrations.
 - [x] Choose AWS account `905418433781` and region `us-east-1`.
 - [x] Configure the GitHub OIDC provider, role `github-traveled-deploy` and policy `TraveledPhotoUploadDeploy` (operator-reported complete; live access not yet verified).
