@@ -63,8 +63,6 @@ jobs:
         with:
           version: 2.81.3
       - uses: aws-actions/setup-sam@v2
-      - name: Check configuration and migration; pause upload admission
-        run: node scripts/deploy-photo-upload.mjs prepare
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -77,10 +75,13 @@ jobs:
             -v "$PWD/infrastructure/photo-classifier/dist/lambda:/artifact" \
             public.ecr.aws/sam/build-nodejs24.x \
             /workspace/infrastructure/photo-classifier/build-artifact.mjs /artifact
+          sam validate --lint --template-file infrastructure/photo-classifier/template.yaml
+      - name: Check configuration and migration; remember and pause upload admission
+        id: admission
+        run: node scripts/deploy-photo-upload.mjs prepare
       - name: Deploy IAM-only classifier
         run: |
           sam deploy --help >/dev/null
-          sam validate --lint --template-file infrastructure/photo-classifier/template.yaml
           sam deploy --template-file infrastructure/photo-classifier/template.yaml \
             --stack-name "$PHOTO_CLASSIFIER_STACK_NAME" --region "$PHOTO_CLASSIFIER_AWS_REGION" \
             --resolve-s3 --capabilities CAPABILITY_IAM --no-confirm-changeset --no-fail-on-empty-changeset \
@@ -105,8 +106,15 @@ jobs:
           supabase functions deploy --help >/dev/null
           supabase functions deploy photo-upload --project-ref "$SUPABASE_PROJECT_REF" --use-api
           supabase functions deploy photo-upload-worker --project-ref "$SUPABASE_PROJECT_REF" --use-api
-      - name: Schedule worker and verify backend
+      - name: Schedule worker, verify backend and restore upload admission
+        id: verify
+        env:
+          PHOTO_UPLOAD_ADMISSION_ENABLED_BEFORE: ${{ steps.admission.outputs.admission_enabled_before }}
+          PHOTO_UPLOAD_ADMISSION_REVISION: ${{ steps.admission.outputs.admission_revision }}
         run: node scripts/deploy-photo-upload.mjs verify
       - name: Record next step
+        env:
+          ADMISSION_STATUS: ${{ steps.verify.outputs.admission_status }}
         run: |
-          echo 'Backend deployed and checked. Upload admission remains paused. Complete the live release checks in docs/photo-upload-runbook.md before enabling uploads.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Backend deployed and checked. Upload admission: $ADMISSION_STATUS." >> "$GITHUB_STEP_SUMMARY"
+          echo 'Previously enabled uploads resume automatically unless the switch changed during deployment. Previously paused uploads stay paused. See docs/photo-upload-runbook.md for first-release checks and recovery.' >> "$GITHUB_STEP_SUMMARY"

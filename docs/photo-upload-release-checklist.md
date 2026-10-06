@@ -12,21 +12,21 @@ Run these checks in order against the release revision. The frontend may run on 
 6. Sign in as A, create a dedicated group and trip, and prepare separate browser profiles for member B and non-member C. Record only account aliases in repository evidence.
 7. Through trusted SQL Editor access, run `select public.upload_health();`. Record baseline counts. Require `queues`, `cron`, `pg_net`, and `scheduled` to be true; diagnose existing failures/backlogs before starting.
 
-Admission is a **global switch**, not a test-account allowlist. Coordinate a quiet test window before the operator runs:
+For initial rollout or recovery from a paused deployment, admission is a **global switch**, not a test-account allowlist. Record the original admission setting and coordinate a quiet test window before the operator runs:
 
 ```sql
 update upload_private.settings set admission_enabled = true where singleton;
 select public.upload_health();
 ```
 
-After the live batch (also after a failure), the operator closes the window:
+After a failed live batch, or when admission was originally paused, the operator closes the window:
 
 ```sql
 update upload_private.settings set admission_enabled = false where singleton;
 select public.upload_health();
 ```
 
-Existing jobs and cleanup continue while admission is paused. Enabling admission for testing does not approve the general release.
+If admission was already enabled for the accepted production release and the live checks pass, preserve that enabled setting. Existing jobs and cleanup continue while admission is paused. Enabling admission for initial testing does not approve the general release. An explicit pause during a GitHub deployment prevents that deployment from automatically resuming admission.
 
 ## 2. Execute the scenario matrix
 

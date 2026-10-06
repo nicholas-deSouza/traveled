@@ -1,9 +1,29 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { appendFileSync } from 'node:fs';
 import { createDiagnostics, fail, isRecord, request as diagnosticRequest, runScript } from './script-diagnostics.mjs';
 
-// Operational settings only. This script never applies migrations or enables admission.
+// Operational settings only. Migrations are installed separately. Resume only
+// after verification, and only while this deployment still owns the pause.
 const healthQuery = 'select public.upload_health() as health';
+const resumeReadyQuery = `select exists (
+  select 1 from pg_catalog.pg_trigger
+  where tgrelid = 'upload_private.settings'::regclass
+    and tgname = 'photo_upload_admission_revision' and tgenabled in ('O', 'A')
+    and tgfoid = pg_catalog.to_regprocedure('upload_private.bump_admission_revision()')
+) as ready`;
+const pauseQuery = `with previous as materialized (
+  select admission_enabled from upload_private.settings where singleton for update
+)
+update upload_private.settings s set admission_enabled = false
+from previous where s.singleton
+returning previous.admission_enabled as admission_enabled_before,
+  s.admission_revision::text as admission_revision`;
+const resumeQuery = `update upload_private.settings set admission_enabled = true
+where singleton and admission_enabled = false and admission_revision = $1::bigint
+returning admission_revision::text as admission_revision`;
+const isRevision = value => typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value)
+  && BigInt(value) <= 9223372036854775807n;
 const vaultQuery = `with existing as materialized (
   select id from vault.secrets where name = $1::text
 ), updated as (
@@ -39,12 +59,21 @@ export function deploymentConfig(env, phase) {
   if (!/^AKIA[A-Z0-9]{16}$/.test(accessKey)) throw new Error('Use a dedicated durable IAM access key for the Edge runtime.');
   const secretKey = required('PHOTO_CLASSIFIER_AWS_SECRET_ACCESS_KEY');
   const functionArn = env.PHOTO_CLASSIFIER_FUNCTION_NAME;
+  let resumeAdmission, admissionRevision;
   if (phase !== 'prepare') {
     const fn = /^arn:aws:lambda:([^:]+):(\d{12}):function:[A-Za-z0-9_-]+$/.exec(functionArn ?? '');
     if (!fn || fn[1] !== region || fn[2] !== secret[2]) throw new Error('Classifier output must be a Lambda ARN in the configured region and account.');
   }
+  if (phase === 'verify') {
+    const before = env.PHOTO_UPLOAD_ADMISSION_ENABLED_BEFORE;
+    admissionRevision = env.PHOTO_UPLOAD_ADMISSION_REVISION;
+    if (!['true', 'false'].includes(before) || !isRevision(admissionRevision)) {
+      throw new Error('Verification requires the admission state and revision returned by this deployment\'s prepare step.');
+    }
+    resumeAdmission = before === 'true';
+  }
   return { project, region, token, workerToken, accessKey, secretKey, functionArn,
-    url: `https://${project}.supabase.co` };
+    resumeAdmission, admissionRevision, url: `https://${project}.supabase.co` };
 }
 
 export async function deployBackend(phase, env, fetchRequest = fetch, diagnostics = createDiagnostics('deploy-photo-upload')) {
@@ -83,12 +112,25 @@ export async function deployBackend(phase, env, fetchRequest = fetch, diagnostic
 
   if (phase === 'prepare') {
     await health(false);
-    await query('update upload_private.settings set admission_enabled = false where singleton');
+    const readiness = await query(resumeReadyQuery, [], false, {
+      stage: 'database.resume-readiness',
+      validate: rows => Array.isArray(rows) && rows.length === 1 && typeof rows[0]?.ready === 'boolean',
+      expected: 'one automatic-resume readiness row',
+    });
+    if (!readiness[0].ready) throw fail('database.resume-readiness', 'missing_resume_migration',
+      'Install the photo upload automatic-resume migration before deploying. Upload admission has not been changed.');
+    const rows = await query(pauseQuery, [], false, {
+      stage: 'database.pause',
+      validate: rows => Array.isArray(rows) && rows.length === 1
+        && typeof rows[0]?.admission_enabled_before === 'boolean' && isRevision(rows[0]?.admission_revision),
+      expected: 'one paused admission row with its previous state and revision',
+    });
     // Confirm the singleton exists and the pause took effect before changing services.
     const state = await health(false);
     if (state.admission_enabled !== false) throw fail('database.pause', 'admission_not_paused', 'Could not pause upload admission.');
     diagnostics.event(phase, 'completed');
-    return;
+    return { admission_enabled_before: rows[0].admission_enabled_before,
+      admission_revision: rows[0].admission_revision };
   }
   if (phase === 'configure') {
     const secrets = {
@@ -113,7 +155,7 @@ export async function deployBackend(phase, env, fetchRequest = fetch, diagnostic
       });
     }
     diagnostics.event(phase, 'completed');
-    return;
+    return {};
   }
 
   const uploadUrl = `${config.url}/functions/v1/photo-upload`;
@@ -140,12 +182,33 @@ export async function deployBackend(phase, env, fetchRequest = fetch, diagnostic
   diagnostics.event('edge.worker-health', 'validated', { count: worker.processed });
   await query('select public.upload_schedule()', [], false, { stage: 'database.schedule' });
   await health(true);
+  let admissionStatus = 'kept_paused';
+  if (config.resumeAdmission) {
+    const rows = await query(resumeQuery, [config.admissionRevision], false, {
+      stage: 'database.resume',
+      validate: rows => Array.isArray(rows) && (rows.length === 0
+        || rows.length === 1 && rows[0]?.admission_revision === String(BigInt(config.admissionRevision) + 1n)),
+      expected: 'no rows after an intervening switch change, or one resumed admission row with the next revision',
+    });
+    admissionStatus = rows.length === 1 ? 'resumed' : 'operator_override';
+    diagnostics.event('database.resume', rows.length === 1 ? 'restored' : 'skipped');
+  }
   diagnostics.event(phase, 'completed');
+  return { admission_status: admissionStatus };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   await runScript('deploy-photo-upload', async diagnostics => {
-    await deployBackend(process.argv[2], process.env, fetch, diagnostics);
-    console.log('Backend configuration step completed. Upload admission remains paused.');
+    const result = await deployBackend(process.argv[2], process.env, fetch, diagnostics);
+    if (process.env.GITHUB_OUTPUT) {
+      appendFileSync(process.env.GITHUB_OUTPUT,
+        Object.entries(result).map(([name, value]) => `${name}=${value}\n`).join(''));
+    }
+    const messages = {
+      resumed: 'Backend verified. Upload admission automatically resumed.',
+      kept_paused: 'Backend verified. Upload admission was already paused and remains paused.',
+      operator_override: 'Backend verified. Upload admission changed during deployment; automatic resume skipped.',
+    };
+    console.log(messages[result.admission_status] ?? 'Backend configuration step completed.');
   });
 }
