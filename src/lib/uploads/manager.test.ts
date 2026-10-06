@@ -679,13 +679,13 @@ describe('upload lifecycle', () => {
     expect(manager.getSnapshot().items[0].local_status).not.toBe('failed');
     vi.restoreAllMocks();
   });
-  it('keeps all selected files during capacity pauses and resumes without consuming technical attempts', async () => {
+  it.each(['Storage capacity is paused', 'Uploads are paused', 'Queue is full'])('keeps all selected files during %s and resumes without consuming technical attempts', async message => {
     vi.useFakeTimers();
     const { manager, dependencies, server, requests } = harness();
     const original = dependencies.api.request;
     let paused = true;
     dependencies.api.request = vi.fn(async (body) => {
-      if (body.action === 'admit' && paused) throw new UploadApiError('Storage capacity is paused', 503);
+      if (body.action === 'admit' && paused) throw new UploadApiError(message, 503);
       return original(body);
     });
     manager.start(); await flush();

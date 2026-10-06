@@ -120,3 +120,18 @@ it.each(['published', 'canceled', 'deleted'] as const)('clears stale action erro
   expect(screen.getByRole('heading', { name: 'Photo uploads' })).toBeInTheDocument();
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
+
+it('explains an operator pause without claiming storage is full or offering a failed retry', () => {
+  mock.snapshot.items = [item({ pause_reason: 'admission', local_error: 'Uploads are paused' })];
+  mount();
+  expect(screen.getByText(/Paused by the upload service/)).toHaveTextContent('keep this tab open');
+  expect(screen.queryByText(/Storage capacity unavailable/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Retry failed' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cancel remaining' })).toBeEnabled();
+});
+it('distinguishes a full personal queue from project storage capacity', () => {
+  mock.snapshot.items = [item({ pause_reason: 'queue' })];
+  mount();
+  expect(screen.getByText(/Your upload queue is full/)).toBeInTheDocument();
+  expect(screen.queryByText(/Storage capacity unavailable/)).not.toBeInTheDocument();
+});

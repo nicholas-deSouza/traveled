@@ -8,10 +8,12 @@ export type PhotoUploadApi = {
   recover(path: string): Promise<Blob>;
 };
 export class UploadApiError extends Error {
-  readonly pause_reason: 'capacity' | 'quota' | null;
+  readonly pause_reason: 'capacity' | 'quota' | 'admission' | 'queue' | null;
   constructor(message: string, readonly status = 0) {
     super(message);
-    this.pause_reason = /(?:Storage capacity is paused|Queue is full|Uploads are paused)/i.test(message) ? 'capacity'
+    this.pause_reason = /Uploads are paused/i.test(message) ? 'admission'
+      : /Queue is full/i.test(message) ? 'queue'
+      : /Storage capacity is paused/i.test(message) ? 'capacity'
       : /(?:Provider quota is paused|Moderation free allowance is paused)/i.test(message) ? 'quota' : null;
   }
   get retryable() { return this.pause_reason !== null || this.status === 0 || this.status >= 500 || [408, 429].includes(this.status); }
