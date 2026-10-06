@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from 'react-router-dom';
 import maplibregl from "maplibre-gl";
 import { Button } from "../ui/button";
@@ -28,9 +28,25 @@ function PhotoMarker({ point }: { point: Thumbnail }) {
 
 function TripLocationPopup({ popup, onClose, onZoom, zooming, error }: { popup: Popup; onClose: () => void; onZoom: () => void; zooming: boolean; error: string | null }) {
   const link = useRef<HTMLAnchorElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: 12, top: 12 });
+  useLayoutEffect(() => {
+    const element = panel.current!;
+    const parent = element.parentElement!;
+    const place = () => {
+      const left = Math.max(12, Math.min(popup.x - element.offsetWidth / 2, parent.clientWidth - element.offsetWidth - 12));
+      const top = Math.max(12, Math.min(popup.y - element.offsetHeight - 12, parent.clientHeight - element.offsetHeight - 12));
+      setPosition(previous => previous.left === left && previous.top === top ? previous : { left, top });
+    };
+    place();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(place);
+    observer.observe(parent); observer.observe(element);
+    return () => observer.disconnect();
+  }, [popup.x, popup.y]);
   useEffect(() => { link.current?.focus(); }, []);
-  return <div role="dialog" aria-label="Trip location" onKeyDown={event => { if (event.key === 'Escape') onClose(); }} className="pointer-events-auto absolute z-10 w-56 rounded-xl bg-white p-3 shadow-lg" style={{ left: `clamp(7.5rem, ${popup.x}px, calc(100% - 7.5rem))`, top: `max(8rem, ${popup.y}px)`, transform: 'translate(-50%, calc(-100% - 12px))' }}>
-    <Link ref={link} className="font-medium underline" to={`/trips/${encodeURIComponent(popup.tripId)}`}>{popup.title}</Link>
+  return <div ref={panel} role="dialog" aria-label="Trip location" onKeyDown={event => { if (event.key === 'Escape') onClose(); }} className="pointer-events-auto absolute z-10 w-56 overflow-y-auto rounded-xl bg-white p-3 shadow-lg" style={{ ...position, maxHeight: 'calc(100% - 24px)' }}>
+    <Link ref={link} className="flex min-h-11 items-center break-words font-medium underline sm:min-h-0" to={`/trips/${encodeURIComponent(popup.tripId)}`}>{popup.title}</Link>
     <p>{popup.count} photos {popup.clusterId === undefined ? 'at this location' : 'across grouped locations'}</p>
     {popup.clusterId !== undefined && <><p className="mt-1 text-xs text-ink/70">Zoom in to see their separate locations.</p><Button size="sm" disabled={zooming} onClick={onZoom}>{zooming ? 'Zooming…' : 'Show locations'}</Button></>}
     {error && <p role="alert">{error}</p>}
@@ -243,7 +259,7 @@ export function TravelGlobe({ trips, photos }: Atlas) {
     <div ref={container} tabIndex={-1} aria-label="Interactive globe with trip photo locations" className="h-[460px] w-full overflow-hidden rounded-3xl bg-ink md:h-[620px]" />
     <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
       {clusters.map(cluster => <button key={`${cluster.sourceId}-${cluster.clusterId}`} type="button"
-        className="pointer-events-auto absolute flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-xs font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+        className="pointer-events-auto absolute flex h-11 w-11 items-center justify-center rounded-full border-2 border-white text-xs font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:h-9 sm:w-9"
         style={{ left: cluster.x, top: cluster.y, transform: 'translate(-50%, -50%)', backgroundColor: cluster.color }}
         aria-label={`${cluster.title}: ${cluster.count} photos across grouped locations. Explore group`}
         onClick={() => { const selected = { ...cluster }; setZoomError(null); setZooming(false); popupRef.current = selected; setPopup(selected); }}>{cluster.count}</button>)}

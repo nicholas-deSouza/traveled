@@ -27,6 +27,7 @@ export function createUploadManager(userId: string, dependencies: Partial<Manage
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     getSnapshot: () => snapshot,
     enqueue: (tripId, files) => active().enqueue(tripId, files),
+    preview: (source, signal) => active().preview(source, signal),
     retry: (id) => active().retry(id),
     cancel: (id) => active().cancel(id),
     clearFinished: () => active().clearFinished(),

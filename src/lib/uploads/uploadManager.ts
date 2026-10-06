@@ -3,7 +3,7 @@ import { extractLocation } from '../photoMetadata';
 import { createMetadataStore, type MetadataStore, type UploadMetadata } from './metadataStore';
 import { photoUploadApi, UploadApiError, type PhotoUploadApi } from './photoUploadApi';
 import { assertSourceSize, fingerprint, validateSourceFile } from './imageValidation';
-import { processPhoto, precheckPhoto } from './processor';
+import { processPhoto, precheckPhoto, previewPhoto } from './processor';
 import { deviceLimits, ResourcePools, pause, StoppedUpload } from './resourcePools';
 
 export type UploadItem = UploadSubmission & {
@@ -18,6 +18,7 @@ export type UploadManager = {
   subscribe(listener: () => void): () => void;
   getSnapshot(): UploadSnapshot;
   enqueue(tripId: string, files: File[]): Promise<void>;
+  preview(source: Blob, signal: AbortSignal): Promise<Blob>;
   retry(id: string): Promise<void>;
   cancel(id: string): Promise<void>;
   clearFinished(): Promise<void>;
@@ -28,6 +29,7 @@ export type ManagerDependencies = {
   api: PhotoUploadApi; store: MetadataStore; locks: LockManager; channel: BroadcastChannel;
   process(source: Blob, signal: AbortSignal): Promise<Blob>;
   precheck?(source: Blob, signal: AbortSignal): Promise<boolean | null>;
+  preview?(source: Blob, signal: AbortSignal): Promise<Blob>;
   fingerprint(blob: Blob): Promise<string>;
   validateSource(file: Blob): Promise<void>;
   gps(file: File): Promise<{ latitude: number | null; longitude: number | null }>;
@@ -60,6 +62,7 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
   const checked = new Set<string>();
   const running = new Map<string, AbortController>();
   const listeners = new Set<() => void>();
+  let lastGrantAt = Date.now();
   let snapshot: UploadSnapshot = { items: [], error: compatible ? null : 'Photo uploading requires Web Locks, IndexedDB, workers, and canvas support. Use a current supported browser.', compatible };
   const emit = () => {
     if (lifetime.signal.aborted) return;
@@ -325,14 +328,41 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
           const ids = await refresh();
           if (lifetime.signal.aborted) return;
           // Grants contain identifiers only; each originating tab keeps its own File and does local work.
-          deps.channel.postMessage({ type: 'grant', ids }); dispatch(ids);
-          if (snapshot.error) { snapshot = { ...snapshot, error: null }; emit(); }
+          grant(ids);
         } catch (error) {
           if (!lifetime.signal.aborted) { snapshot = { ...snapshot, error: error instanceof Error ? error.message : 'The upload queue is unavailable.' }; emit(); }
         }
         await pause(2000, lifetime.signal);
       }
     });
+  }
+  function grant(ids: string[]) {
+    lastGrantAt = Date.now();
+    deps.channel.postMessage({ type: 'grant', ids }); dispatch(ids);
+    if (snapshot.error) { snapshot = { ...snapshot, error: null }; emit(); }
+  }
+  async function watchCoordinator() {
+    while (!lifetime.signal.aborted) {
+      await pause(2000, lifetime.signal);
+      const canWork = [...items.values()].some(item => !item.outcome && item.local_status !== 'failed'
+        && (item.phase !== 'original_upload' || files.has(item.id)));
+      if (!canWork || !deps.online() || Date.now() - lastGrantAt < 10000) continue;
+      // A frozen/background coordinator can retain its Web Lock without sending
+      // grants. Coalesce fallback polling; existing per-item locks still prevent
+      // duplicate transfers, and healthy grants suppress this extra work.
+      await deps.locks.request(`${account}:coordinator-watchdog`, { ifAvailable: true }, async lock => {
+        if (!lock || lifetime.signal.aborted || Date.now() - lastGrantAt < 10000) return;
+        lastGrantAt = Date.now();
+        try {
+          const ids = await refresh();
+          if (!lifetime.signal.aborted) grant(ids);
+        } catch (error) {
+          if (!lifetime.signal.aborted) {
+            snapshot = { ...snapshot, error: error instanceof Error ? error.message : 'The upload queue is unavailable.' }; emit();
+          }
+        }
+      });
+    }
   }
   const ready = compatible ? (async () => {
     if (overrides.compatible === undefined) {
@@ -357,15 +387,32 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
     if (lifetime.signal.aborted) return;
     deps.channel.onmessage = (event: MessageEvent<{ type?: string; ids?: string[] }>) => {
       if (event.data.type === 'grant' && Array.isArray(event.data.ids)) {
+        lastGrantAt = Date.now();
         const ids = event.data.ids.filter((id) => typeof id === 'string');
         void refresh().then(() => dispatch(ids)).catch(() => undefined);
       }
     };
     void lead().catch(() => { /* Aborting a pending leader lock is expected on sign-out. */ });
+    void watchCoordinator().catch(() => { /* Stopping the manager cancels the watchdog timer. */ });
   })().catch((error: unknown) => { snapshot = { ...snapshot, error: error instanceof Error ? error.message : 'Upload recovery failed.' }; emit(); }) : Promise.resolve();
   return {
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     getSnapshot: () => snapshot,
+    async preview(source, signal) {
+      if (!compatible) throw new Error(snapshot.error!);
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal.addEventListener('abort', abort, { once: true });
+      lifetime.signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted || lifetime.signal.aborted) abort();
+      try {
+        // Previews share the upload processing slots, including across tabs.
+        return await pools.run('processing', controller.signal, () => (deps.preview ?? previewPhoto)(source, controller.signal));
+      } finally {
+        signal.removeEventListener('abort', abort);
+        lifetime.signal.removeEventListener('abort', abort);
+      }
+    },
     async clearFinished() {
       for (const item of snapshot.items) {
         if (!item.outcome || ['published', 'canceled', 'deleted'].includes(item.outcome)) continue;

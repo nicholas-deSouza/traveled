@@ -9,7 +9,7 @@ vi.mock('../lib/groups', () => ({ loadTrip: vi.fn(), errorMessage: (error: Error
 vi.mock('../lib/useSession', () => ({ useSession: () => ({ user: { id: 'member' } }) }));
 vi.mock('../components/photos/TripPhotos', () => ({ TripPhotos: () => <p>Trip gallery</p> }));
 const enqueue = vi.hoisted(() => vi.fn());
-vi.mock('../lib/useUploadManager', () => ({ useUploadManager: () => ({ enqueue }) }));
+vi.mock('../lib/useUploadManager', () => ({ useUploadManager: () => ({ enqueue }), useUploadQueuePlacement: () => null }));
 const NativeURL = URL;
 beforeEach(() => {
   vi.stubGlobal('URL', class extends NativeURL {

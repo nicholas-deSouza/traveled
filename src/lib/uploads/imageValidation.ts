@@ -1,6 +1,8 @@
 import { UPLOAD_LIMITS } from '../photoUploadContract';
 export function assertSourceSize(size: number) {
-  if (!Number.isInteger(size) || size <= 0 || size > UPLOAD_LIMITS.originalBytes)
+  if (!Number.isInteger(size) || size < 0) throw new Error('This photo has an invalid file size. Choose a different photo.');
+  if (size === 0) throw new Error('This photo is empty. Choose a different photo.');
+  if (size > UPLOAD_LIMITS.originalBytes)
     throw new Error('Choose a photo no larger than 20 MiB.');
 }
 export function imageDimensions(width: number, height: number) {

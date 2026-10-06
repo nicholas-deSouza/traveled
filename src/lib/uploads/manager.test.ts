@@ -41,6 +41,72 @@ function harness(initial: UploadSubmission[] = []) {
 }
 async function flush() { for (let index = 0; index < 40; index++) await Promise.resolve(); }
 const unfinishedStages: UploadPhase[] = ['original_upload', 'original_check', 'gps', 'processing', 'candidate_upload', 'candidate_check', 'publication'];
+it('finishes an upload when another tab retains the coordinator lock without sending grants', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies, server, requests } = harness();
+  let releaseCoordinator!: () => void;
+  const frozenCoordinator = dependencies.locks.request('traveled-uploads-user:leader', async () => {
+    await new Promise<void>(resolve => { releaseCoordinator = resolve; });
+  });
+  manager.start(); await flush();
+  await manager.enqueue('trip', [new File(['abc'], 'photo.jpg')]);
+  const id = manager.getSnapshot().items[0].id;
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(dependencies.api.transfer).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(2000); await flush();
+  expect(server.get(id)?.phase).toBe('original_check');
+  expect(dependencies.api.transfer).toHaveBeenCalledTimes(1);
+  server.get(id)!.phase = 'gps';
+  await vi.advanceTimersByTimeAsync(10000); await flush();
+  expect(server.get(id)?.phase).toBe('candidate_check');
+  expect(dependencies.api.transfer).toHaveBeenCalledTimes(2);
+  Object.assign(server.get(id)!, { phase: 'complete', outcome: 'published' });
+  await vi.advanceTimersByTimeAsync(10000); await flush();
+  expect(manager.getSnapshot().items[0].outcome).toBe('published');
+  expect(requests.some(request => request.action === 'browser_failure')).toBe(false);
+  manager.stop(); releaseCoordinator(); await frozenCoordinator;
+  const count = requests.length;
+  await vi.advanceTimersByTimeAsync(20000);
+  expect(requests).toHaveLength(count);
+});
+it('suppresses fallback polling while another coordinator keeps sending healthy grants', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies, requests } = harness([submission({ phase: 'original_check' })]);
+  let releaseCoordinator!: () => void;
+  const healthyCoordinator = dependencies.locks.request('traveled-uploads-user:leader', async () => {
+    await new Promise<void>(resolve => { releaseCoordinator = resolve; });
+  });
+  manager.start(); await flush();
+  for (let tick = 0; tick < 8; tick++) {
+    dependencies.channel.onmessage?.({ data: { type: 'grant', ids: ['submission'] } } as MessageEvent);
+    await flush(); await vi.advanceTimersByTimeAsync(2000);
+  }
+  expect(dependencies.channel.postMessage).not.toHaveBeenCalled();
+  expect(requests.filter(request => request.action === 'list')).toHaveLength(9);
+  expect(dependencies.api.transfer).not.toHaveBeenCalled();
+  manager.stop(); releaseCoordinator(); await healthyCoordinator;
+});
+it('shares the phone processing slot between previews and releases it on selection removal', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies } = harness();
+  dependencies.phone = true;
+  dependencies.preview = vi.fn((_source, signal) => new Promise<Blob>((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new Error('Preview canceled')), { once: true });
+  }));
+  manager.start(); await flush();
+  const first = new AbortController(), second = new AbortController();
+  const firstPreview = manager.preview(new Blob(['first']), first.signal);
+  const firstRejected = expect(firstPreview).rejects.toThrow('Preview canceled');
+  const secondPreview = manager.preview(new Blob(['second']), second.signal);
+  const secondRejected = expect(secondPreview).rejects.toThrow('Preview canceled');
+  await flush();
+  expect(dependencies.preview).toHaveBeenCalledTimes(1);
+  first.abort(); await firstRejected;
+  await vi.advanceTimersByTimeAsync(100); await flush();
+  expect(dependencies.preview).toHaveBeenCalledTimes(2);
+  manager.stop(); await secondRejected;
+  expect(dependencies.api.transfer).not.toHaveBeenCalled();
+});
 it('prunes old finished metadata after reconciliation while preserving recovery, cleanup and recent dismissals', async () => {
   vi.useFakeTimers();
   const old = new Date(Date.now() - 8 * 86400000).toISOString();

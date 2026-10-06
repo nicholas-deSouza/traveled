@@ -4,16 +4,29 @@ import { useUploadManager } from '../../lib/useUploadManager';
 import { Button } from '../ui/button';
 
 function SelectedPhoto({ file, busy, onRemove }: { file: File; busy: boolean; onRemove(): void }) {
+  const { preview: previewPhoto } = useUploadManager();
   const [url, setUrl] = useState('');
   const [unavailable, setUnavailable] = useState(false);
   useEffect(() => {
-    const preview = URL.createObjectURL(file);
-    setUrl(preview);
-    return () => URL.revokeObjectURL(preview);
-  }, [file]);
+    const controller = new AbortController();
+    let preview = '';
+    setUrl(''); setUnavailable(false);
+    async function prepare() {
+      try {
+        const source = /\.(heic|heif)$/i.test(file.name) || /image\/hei[cf]/i.test(file.type)
+          ? await previewPhoto(file, controller.signal) : file;
+        if (controller.signal.aborted) return;
+        preview = URL.createObjectURL(source);
+        setUrl(preview);
+      } catch { if (!controller.signal.aborted) setUnavailable(true); }
+    }
+    void prepare();
+    return () => { controller.abort(); if (preview) URL.revokeObjectURL(preview); };
+  }, [file, previewPhoto]);
   return <li className="w-28 shrink-0 sm:w-36">
     {unavailable ? <div className="flex aspect-square items-center justify-center rounded-xl bg-sand p-3 text-center text-xs text-ink/65">Preview unavailable</div>
-      : <img src={url || undefined} alt={`Preview of ${file.name}`} onError={() => setUnavailable(true)} className="aspect-square w-full rounded-xl bg-sand object-cover" />}
+      : url ? <img src={url} alt={`Preview of ${file.name}`} onError={() => setUnavailable(true)} className="aspect-square w-full rounded-xl bg-sand object-cover" />
+        : <div role="status" className="flex aspect-square items-center justify-center rounded-xl bg-sand p-3 text-center text-xs text-ink/65">Preparing preview…</div>}
     <p className="mt-2 truncate text-xs text-ink/65" title={file.name}>{file.name}</p>
     <Button type="button" size="sm" variant="ghost" className="mt-1 w-full cursor-pointer" disabled={busy} aria-label={`Remove ${file.name}`} onClick={onRemove}>Remove</Button>
   </li>;
@@ -70,7 +83,9 @@ export function PhotoUploadForm({ tripId }: { tripId: string }) {
         setSelection(current => current.filter(photo => photo.id !== id)); setError('');
       }} />)}
     </ul>}
-    {message && <p className="mt-4 text-sm" role="status">{message}</p>}
+    {message && <div className="mt-4 text-sm"><p role="status">{message}</p>
+      <a href="#photo-upload-progress" className="inline-flex min-h-11 items-center text-moss underline">View upload progress</a>
+    </div>}
     {error && <p className="mt-4 text-sm text-red-700" role="alert">{error}</p>}
   </form>;
 }

@@ -65,6 +65,16 @@ it('explains browser incompatibility and quota pauses', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('Update your browser');
   expect(screen.getByText(/verification allowance resets/)).toBeInTheDocument();
 });
+it.each([
+  ['Uploads are paused', 'Paused by the upload service'],
+  ['Storage capacity is paused', 'Paused: Storage capacity unavailable'],
+])('distinguishes %s from other pause causes', (error, message) => {
+  mock.snapshot.items = [item({ pause_reason: 'capacity', local_error: error })];
+  mount();
+  expect(screen.getByText(message)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Retry failed' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cancel remaining' })).toBeEnabled();
+});
 it('hides canceled uploads and the empty queue', () => {
   mock.snapshot.items = [item({ trip_id: '00000000-0000-0000-0000-000000000000', outcome: 'canceled', phase: 'complete' })];
   mount();

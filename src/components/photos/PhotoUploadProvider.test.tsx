@@ -6,7 +6,7 @@ import type { UploadSubmission } from '../../lib/photoUploadContract';
 import { MemoryRouter, Link, Routes, Route } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { createUploadManager } from '../../lib/uploads/manager';
-import { useUploadManager } from '../../lib/useUploadManager';
+import { useUploadManager, useUploadQueuePlacement } from '../../lib/useUploadManager';
 
 const mock = vi.hoisted(() => ({ stop: vi.fn(), start: vi.fn(), listener: () => {}, items: [] as UploadSubmission[] }));
 vi.mock('../../lib/uploads/manager', () => ({ createUploadManager: vi.fn(() => ({
@@ -63,4 +63,16 @@ it('replaces the context and stops the old manager when the signed-in account ch
   expect(createUploadManager).toHaveBeenNthCalledWith(2, 'second');
   unmount();
   expect(second.stop).toHaveBeenCalledOnce();
+});
+
+it('places progress beside a trip form and retains it when leaving the trip', async () => {
+  function Trip() { const target = useUploadQueuePlacement(); return <div><p>Upload form</p><div ref={target} aria-label="Trip progress" /><p>Gallery</p></div>; }
+  render(<MemoryRouter><PhotoUploadProvider userId="user"><Link to="/groups">Groups</Link><Routes>
+    <Route path="/" element={<Trip />} /><Route path="/groups" element={<p>Groups page</p>} />
+  </Routes></PhotoUploadProvider></MemoryRouter>);
+  expect(screen.getByLabelText('Trip progress')).toContainElement(screen.getByText('Upload controls'));
+  expect(screen.getAllByText('Upload controls')).toHaveLength(1);
+  await userEvent.click(screen.getByRole('link', { name: 'Groups' }));
+  expect(screen.getByText('Upload controls')).toBeInTheDocument();
+  expect(mock.stop).not.toHaveBeenCalled();
 });

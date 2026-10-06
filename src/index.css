@@ -21,3 +21,7 @@
 
 /* Lock scrolling while any native modal is open, including stacked dialogs. */
 body:has(dialog:modal) { overflow: hidden; }
+
+@media (max-width: 639px), (pointer: coarse) {
+  .maplibregl-ctrl-group button { width: 44px; height: 44px; }
+}
