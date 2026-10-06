@@ -1,6 +1,6 @@
 import { Blob as NodeBlob } from 'node:buffer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { optimizePhoto } from './processing.worker';
+import { optimizePhoto, previewPhoto } from './processing.worker';
 
 const heif = vi.hoisted(() => ({ initialize: vi.fn() }));
 const fallback = vi.hoisted(() => ({ encodeWebp: vi.fn() }));
@@ -128,4 +128,15 @@ describe('actual photo-processing implementation', () => {
     expect(fixture.free).toHaveBeenCalledOnce();
     expect(fixture.decoder.decoder).toBeNull();
   });
+});
+
+it('decodes HEIC selection previews as bounded PNGs and releases the native resources', async () => {
+  const fixture = decoderFixture();
+  encode.mockResolvedValue(new Blob(['preview'], { type: 'image/png' }));
+  expect((await previewPhoto(heic())).blob.type).toBe('image/png');
+  expect(draw).toHaveBeenCalledWith(bitmap, 0, 0, 320, 160);
+  expect(encode).toHaveBeenCalledWith({ type: 'image/png' });
+  expect(fixture.images[0].free).toHaveBeenCalledOnce();
+  expect(fixture.free).toHaveBeenCalledOnce();
+  expect(bitmap.close).toHaveBeenCalledOnce();
 });

@@ -1,5 +1,11 @@
 import { StoppedUpload } from './resourcePools';
 export function processPhoto(source: Blob, signal: AbortSignal): Promise<Blob> {
+  return renderPhoto(source, signal, false);
+}
+export function previewPhoto(source: Blob, signal: AbortSignal): Promise<Blob> {
+  return renderPhoto(source, signal, true);
+}
+function renderPhoto(source: Blob, signal: AbortSignal, preview: boolean): Promise<Blob> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new StoppedUpload()); return; }
     const worker = new Worker(new URL('./processing.worker.ts', import.meta.url), { type: 'module' });
@@ -12,7 +18,7 @@ export function processPhoto(source: Blob, signal: AbortSignal): Promise<Blob> {
       if (event.data.blob) resolve(event.data.blob);
       else reject(new Error(event.data.error || 'The photo could not be processed.'));
     };
-    worker.postMessage({ source });
+    worker.postMessage(preview ? { source, preview: true } : { source });
   });
 }
 /** Entire optional precheck, including cold model loading/decoding, is capped at five seconds. */

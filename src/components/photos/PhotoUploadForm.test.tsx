@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PhotoUploadForm } from './PhotoUploadForm';
 
-const enqueue = vi.hoisted(() => vi.fn());
-vi.mock('../../lib/useUploadManager', () => ({ useUploadManager: () => ({ enqueue }) }));
+const { enqueue, preview } = vi.hoisted(() => ({ enqueue: vi.fn(), preview: vi.fn() }));
+vi.mock('../../lib/useUploadManager', () => ({ useUploadManager: () => ({ enqueue, preview }) }));
 vi.mock('../../lib/groups', () => ({ errorMessage: (error: Error) => error.message }));
 const NativeURL = URL;
 beforeEach(() => {
   enqueue.mockReset().mockResolvedValue(undefined);
+  preview.mockReset().mockResolvedValue(new Blob(['preview'], { type: 'image/png' }));
   let nextUrl = 0;
   vi.stubGlobal('URL', class extends NativeURL {
     static createObjectURL = vi.fn(() => `blob:preview-${nextUrl++}`);
@@ -136,4 +137,37 @@ it('keeps removal available when the browser cannot preview a selected image', a
   await userEvent.click(screen.getByRole('button', { name: 'Remove first.jpg' }));
   expect(screen.queryByText('Preview unavailable')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Upload photos' })).toBeDisabled();
+});
+
+it('shows a decoded HEIC preview and releases it on removal', async () => {
+  let finish!: (blob: Blob) => void;
+  preview.mockReturnValue(new Promise<Blob>(resolve => { finish = resolve; }));
+  mount();
+  const file = new File(['heic'], 'memory.heic', { type: 'image/heic' });
+  await userEvent.upload(screen.getByLabelText('Add photos', { selector: 'input' }), file);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparing preview');
+  const signal = preview.mock.calls[0][1] as AbortSignal;
+  await act(async () => finish(new Blob(['decoded'], { type: 'image/png' })));
+  expect(await screen.findByRole('img', { name: 'Preview of memory.heic' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Remove memory.heic' }));
+  expect(signal.aborted).toBe(true);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-0');
+});
+it('aborts unfinished HEIC previews and ignores a result arriving after removal', async () => {
+  let finish!: (blob: Blob) => void;
+  preview.mockReturnValue(new Promise<Blob>(resolve => { finish = resolve; }));
+  mount();
+  await userEvent.upload(screen.getByLabelText('Add photos', { selector: 'input' }), new File(['heic'], 'memory.heic', { type: 'image/heic' }));
+  const signal = preview.mock.calls[0][1] as AbortSignal;
+  await userEvent.click(screen.getByRole('button', { name: 'Remove memory.heic' }));
+  expect(signal.aborted).toBe(true);
+  await act(async () => finish(new Blob(['late preview'], { type: 'image/png' })));
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
+  expect(screen.queryByRole('img')).not.toBeInTheDocument();
+});
+it('provides a link to upload progress after queueing', async () => {
+  mount();
+  await userEvent.upload(screen.getByLabelText('Add photos', { selector: 'input' }), first);
+  await userEvent.click(screen.getByRole('button', { name: 'Upload 1 photo' }));
+  expect(screen.getByRole('link', { name: 'View upload progress' })).toHaveAttribute('href', '#photo-upload-progress');
 });

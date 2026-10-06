@@ -40,9 +40,9 @@ export function AppShell() {
   }
   return (
     <div className="min-h-screen p-3 md:p-5">
-      <header className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-ink/10 bg-white/80 px-4 py-3 backdrop-blur md:px-5">
-        <Link to="/" className="flex items-center gap-2 font-display text-2xl tracking-tight"><MapPinned className="h-5 w-5 text-ember" /> Traveled</Link>
-        <nav aria-label="Main navigation" className="relative isolate grid grid-cols-2 items-center gap-1">
+      <header className="mx-auto grid max-w-7xl grid-cols-[1fr_auto] items-center gap-2 rounded-2xl border border-ink/10 bg-white/80 px-3 py-3 backdrop-blur sm:flex sm:flex-wrap sm:justify-between sm:px-4 md:px-5">
+        <Link to="/" className="flex min-h-11 items-center gap-2 font-display text-xl tracking-tight sm:text-2xl"><MapPinned className="h-5 w-5 text-ember" /> Traveled</Link>
+        <nav aria-label="Main navigation" className="relative isolate order-last col-span-2 grid grid-cols-2 items-center gap-1 sm:order-none">
           <span
             aria-hidden="true"
             className="pointer-events-none absolute inset-y-0 left-0 -z-10 w-[calc((100%-0.25rem)/2)] rounded-full bg-ink transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
@@ -57,7 +57,7 @@ export function AppShell() {
               to={to}
               end={to === "/"}
               className={({ isActive }) => cn(
-                "flex items-center justify-center gap-2 rounded-full px-3 py-2 text-sm transition-colors duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ember focus-visible:ring-offset-2 motion-reduce:transition-none",
+                "flex min-h-11 items-center justify-center gap-2 rounded-full px-3 py-2 text-sm transition-colors duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ember focus-visible:ring-offset-2 motion-reduce:transition-none sm:min-h-9",
                 isActive ? "text-white" : "text-ink/65 hover:bg-ink/5",
               )}
             ><Icon aria-hidden="true" className="h-4 w-4" />{label}</NavLink>

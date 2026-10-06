@@ -1,17 +1,22 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 
-export function Modal({ label, onClose, children, className = '', busy = false, initialFocusRef }: {
+export function Modal({ label, onClose, children, className = '', busy = false, initialFocusRef, returnFocusRef }: {
   label: string; onClose: () => void; children: ReactNode; className?: string; busy?: boolean;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = ref.current!;
-    // Native modal dialogs provide background inertness, focus containment and restoration.
+    const opener = returnFocusRef?.current ?? dialog.ownerDocument.activeElement;
+    // Close before React removes the dialog, so stacked dialogs retain their focus.
     dialog.showModal();
     initialFocusRef?.current?.focus();
-    return () => dialog.close();
-  }, [initialFocusRef]);
+    return () => {
+      dialog.close();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [initialFocusRef, returnFocusRef]);
   return <dialog ref={ref} tabIndex={-1} aria-label={label} aria-busy={busy}
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}
     onClick={event => { if (event.target === event.currentTarget && !busy) onClose(); }}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { precheckPhoto, processPhoto } from './processor';
+import { precheckPhoto, processPhoto, previewPhoto } from './processor';
 class FakeWorker {
   static instances: FakeWorker[] = [];
   onmessage: ((event: MessageEvent) => void) | null = null;
@@ -29,4 +29,16 @@ describe('worker lifetime', () => {
     await expect(result).rejects.toThrow('8 MiB');
     expect(FakeWorker.instances[0].terminate).toHaveBeenCalledOnce();
   });
+});
+
+it('returns a decoded preview and terminates its worker when selection is removed', async () => {
+  vi.stubGlobal('Worker', FakeWorker);
+  const controller = new AbortController();
+  const source = new Blob(['heic']);
+  const pending = previewPhoto(source, controller.signal);
+  expect(FakeWorker.instances[0].postMessage).toHaveBeenCalledWith({ source, preview: true });
+  const rejected = expect(pending).rejects.toThrow('stopped');
+  controller.abort();
+  await rejected;
+  expect(FakeWorker.instances[0].terminate).toHaveBeenCalledOnce();
 });

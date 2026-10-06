@@ -10,7 +10,7 @@ export type UploadMetadata = {
 };
 export interface MetadataStore {
   list(): Promise<UploadMetadata[]>;
-  put(value: UploadMetadata): Promise<void>;
+  put(value: UploadMetadata): Promise<UploadMetadata | void>;
   remove(id: string): Promise<void>;
   clear(): Promise<void>;
   close?(): void;
@@ -34,7 +34,24 @@ export function createMetadataStore(userId: string): MetadataStore {
   }
   return {
     list: () => operation('readonly', (store) => store.getAll()),
-    put: async (value) => { await operation('readwrite', (store) => store.put(value)); },
+    put: async (value) => {
+      const db = await database;
+      return new Promise<UploadMetadata>((resolve, reject) => {
+        const transaction = db.transaction('submissions', 'readwrite');
+        const store = transaction.objectStore('submissions');
+        const existing = store.get(value.submission.id);
+        // Dismissal is permanent for this submission. An older snapshot from
+        // another tab must not undo Clear while saving refreshed server state.
+        let persisted = value;
+        existing.onsuccess = () => {
+          persisted = { ...value, dismissed: value.dismissed || existing.result?.dismissed };
+          store.put(persisted);
+        };
+        transaction.oncomplete = () => resolve(persisted);
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error('Upload metadata could not be saved.'));
+      });
+    },
     remove: async (id) => { await operation('readwrite', (store) => store.delete(id)); },
     clear: async () => { await operation('readwrite', (store) => store.clear()); },
     close: () => { void database.then((db) => db.close()).catch(() => undefined); },

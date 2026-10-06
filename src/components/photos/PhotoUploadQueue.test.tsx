@@ -65,6 +65,16 @@ it('explains browser incompatibility and quota pauses', () => {
   expect(screen.getByRole('alert')).toHaveTextContent('Update your browser');
   expect(screen.getByText(/verification allowance resets/)).toBeInTheDocument();
 });
+it.each([
+  ['Uploads are paused', 'Paused by the upload service'],
+  ['Storage capacity is paused', 'Paused: Storage capacity unavailable'],
+])('distinguishes %s from other pause causes', (error, message) => {
+  mock.snapshot.items = [item({ pause_reason: 'capacity', local_error: error })];
+  mount();
+  expect(screen.getByText(message)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Retry failed' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Cancel remaining' })).toBeEnabled();
+});
 it('hides canceled uploads and the empty queue', () => {
   mock.snapshot.items = [item({ trip_id: '00000000-0000-0000-0000-000000000000', outcome: 'canceled', phase: 'complete' })];
   mount();
@@ -124,4 +134,15 @@ it('distinguishes a full personal queue from project storage capacity', () => {
   mount();
   expect(screen.getByText(/Your upload queue is full/)).toBeInTheDocument();
   expect(screen.queryByText(/Storage capacity unavailable/)).not.toBeInTheDocument();
+});
+
+it.each([
+  ['admission', /Paused by the upload service/],
+  ['queue', /Your upload queue is full/],
+] as const)('shows the %s pause reason instead of a scheduled retry', (pause_reason, message) => {
+  mock.snapshot.items = [item({ pause_reason, retry_at: '2030-01-01T12:00:00Z' })];
+  mount();
+  expect(screen.getByText(message)).toBeInTheDocument();
+  expect(screen.queryByText(/Retry scheduled/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Retry failed' })).toBeDisabled();
 });

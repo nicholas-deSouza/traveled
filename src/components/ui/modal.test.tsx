@@ -1,4 +1,4 @@
-import { createRef } from 'react';
+import { createRef, useRef, useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
@@ -44,6 +44,25 @@ it('focuses the requested initial control', () => {
     <label>Trip name<input ref={initialFocusRef} /></label>
   </Modal>);
   expect(screen.getByRole('textbox', { name: 'Trip name' })).toHaveFocus();
+});
+
+it('returns focus to its opener before the closed dialog is removed', async () => {
+  function Example() {
+    const [open, setOpen] = useState(false);
+    const opener = useRef<HTMLButtonElement>(null), closeControl = useRef<HTMLButtonElement>(null);
+    return <><button ref={opener} onClick={() => setOpen(true)}>Edit trip</button>
+      {open && <Modal label="Edit trip" returnFocusRef={opener} initialFocusRef={closeControl} onClose={() => setOpen(false)}>
+        <button ref={closeControl} onClick={() => setOpen(false)}>Close settings</button>
+      </Modal>}
+    </>;
+  }
+  render(<Example />);
+  const opener = screen.getByRole('button', { name: 'Edit trip' });
+  await userEvent.click(opener);
+  expect(screen.getByRole('button', { name: 'Close settings' })).toHaveFocus();
+  await userEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
 });
 
 it('handles native cancellation without allowing the browser to close independently', () => {

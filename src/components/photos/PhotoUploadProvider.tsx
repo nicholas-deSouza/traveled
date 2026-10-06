@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { createUploadManager } from '../../lib/uploads/manager';
-import { UploadManagerContext } from '../../lib/useUploadManager';
+import { UploadManagerContext, UploadQueuePlacementContext } from '../../lib/useUploadManager';
 import { notifyPhotoChanged } from '../../lib/photoChanges';
 import { PhotoUploadQueue } from './PhotoUploadQueue';
 
@@ -10,6 +11,7 @@ export function PhotoUploadProvider({ userId, children }: { userId: string; chil
 
 function AccountPhotoUploadProvider({ userId, children }: { userId: string; children: ReactNode }) {
   const [manager] = useState(() => createUploadManager(userId));
+  const [queueTarget, setQueueTarget] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     manager.start();
     const outcomes = new Map<string, string | null>();
@@ -23,5 +25,9 @@ function AccountPhotoUploadProvider({ userId, children }: { userId: string; chil
     });
     return () => { unsubscribe(); manager.stop(); };
   }, [manager]);
-  return <UploadManagerContext.Provider value={manager}>{children}<PhotoUploadQueue /></UploadManagerContext.Provider>;
+  return <UploadManagerContext.Provider value={manager}>
+    <UploadQueuePlacementContext.Provider value={setQueueTarget}>{children}</UploadQueuePlacementContext.Provider>
+    {queueTarget ? createPortal(<PhotoUploadQueue />, queueTarget)
+      : <div id="photo-upload-progress" tabIndex={-1}><PhotoUploadQueue /></div>}
+  </UploadManagerContext.Provider>;
 }

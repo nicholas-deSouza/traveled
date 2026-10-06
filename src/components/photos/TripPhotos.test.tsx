@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { loadTripPhotos, releasePhotos, updatePhotoLocations } from '../../lib/groups';
@@ -116,4 +116,20 @@ it('keeps location selection open as another photo finishes uploading in the bac
   expect(await screen.findByRole('button', { name: 'Open Photo 1 from Paris' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Add location to Photo 1 from Paris' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Add location to Photo 2 from Paris' })).not.toBeInTheDocument();
+});
+
+it('returns focus from delete cancellation to the viewer, then back to the gallery opener', async () => {
+  vi.mocked(loadTripPhotos).mockResolvedValue({ photos: [parisPhoto], hasMore: false });
+  render(<TripPhotos tripId="trip" title="Paris" />);
+  const opener = await screen.findByRole('button', { name: 'Open Photo 1 from Paris' });
+  await userEvent.click(opener);
+  const close = screen.getByRole('button', { name: 'Close photo' });
+  expect(close).toHaveFocus();
+  const remove = within(screen.getByRole('dialog', { name: 'Photo 1 from Paris' })).getByRole('button', { name: 'Delete photo' });
+  await userEvent.click(remove);
+  expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(remove).toHaveFocus();
+  await userEvent.click(close);
+  expect(opener).toHaveFocus();
 });

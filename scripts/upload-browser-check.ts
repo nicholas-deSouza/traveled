@@ -1,4 +1,5 @@
-import { processPhoto } from '../src/lib/uploads/processor';
+import { processPhoto, previewPhoto } from '../src/lib/uploads/processor';
+import { createMetadataStore, type UploadMetadata } from '../src/lib/uploads/metadataStore';
 
 type Result = { case: string; result: 'PASS' | 'FAIL'; detail: string };
 const results: Result[] = [];
@@ -21,6 +22,26 @@ async function source(type: string, width = 96, height = 48) {
   assert(blob.type === type, `Browser cannot encode ${type} test input`);
   return blob;
 }
+await check('Clear survives stale writes from another browser database connection', async () => {
+  const account = `browser-check-${crypto.randomUUID()}`;
+  const first = createMetadataStore(account), second = createMetadataStore(account);
+  const metadata: UploadMetadata = {
+    submission: { id: 'finished', trip_id: 'test-trip', user_id: account, filename: 'test.jpg', phase: 'complete', outcome: 'invalid',
+      generation: 0, created_at: new Date().toISOString(), expires_at: new Date().toISOString(), gps_acknowledged: false,
+      latitude: null, longitude: null, source_sha256: null, source_bytes: 0, retry_at: null, attempts: 0, error: null,
+      pause_reason: null, cleanup_pending: true },
+    admissionRequest: 'test-admission', candidateRequest: null, originalAcknowledged: true,
+  };
+  try {
+    await first.put(metadata);
+    const stale = (await second.list())[0];
+    await first.put({ ...metadata, dismissed: true });
+    await second.put({ ...stale, submission: { ...stale.submission, cleanup_pending: false } });
+    const saved = (await first.list())[0];
+    assert(saved.dismissed === true, 'Another connection restored a cleared result');
+    assert(saved.submission.cleanup_pending === false, 'Preserving dismissal discarded new server state');
+  } finally { await first.clear(); first.close?.(); second.close?.(); }
+});
 await check('Bundled WebP encoder loads in a real worker when native encoding returns PNG', async () => {
   const input = await source('image/png');
   const worker = new Worker(new URL('./upload-browser-fallback.worker.ts', import.meta.url), { type: 'module' });
@@ -55,11 +76,26 @@ async function optimize(source: Blob, width?: number, height?: number) {
     } finally { bitmap.close(); }
   } finally { clearTimeout(timer); }
 }
+async function preview(source: Blob, width?: number, height?: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const output = await previewPhoto(source, controller.signal);
+    assert(output.type === 'image/png', 'Preview is not browser-readable PNG');
+    const bitmap = await createImageBitmap(output);
+    try {
+      assert(Math.max(bitmap.width, bitmap.height) <= 320, 'Preview exceeds 320 pixels');
+      if (width !== undefined) assert(bitmap.width === width && bitmap.height === height, 'Unexpected preview dimensions');
+    } finally { bitmap.close(); }
+  } finally { clearTimeout(timer); }
+}
 for (const type of ['image/jpeg', 'image/png', 'image/webp']) {
   await check(`${type} decoded and optimized by real worker`, async () => optimize(await source(type), 96, 48));
 }
 await check('Aspect ratio preserved at 2560-pixel limit', async () => optimize(await source('image/png', 3200, 1600), 2560, 1280));
 await check('Small images are not upscaled', async () => optimize(await source('image/png', 16, 8), 16, 8));
+await check('Selection preview preserves aspect ratio at 320 pixels', async () => preview(await source('image/png', 3200, 1600), 320, 160));
+await check('Selection preview never upscales small images', async () => preview(await source('image/png', 16, 8), 16, 8));
 await check('JPEG EXIF orientation applied', async () => {
   const original = new Uint8Array(await (await source('image/jpeg')).arrayBuffer());
   // APP1: big-endian TIFF with orientation 6 (90 degrees clockwise).
@@ -78,6 +114,9 @@ await check('Oversized original rejected before decoding', async () => {
 const fileInput = document.getElementById('heic') as HTMLInputElement;
 fileInput.addEventListener('change', async () => {
   const file = fileInput.files?.[0];
-  if (file) await check('Selected single-photo HEIC decoded locally', () => optimize(file));
+  if (file) {
+    await check('Selected single-photo HEIC decoded locally', () => optimize(file));
+    await check('Selected HEIC preview is a bounded browser-readable PNG', () => preview(file));
+  }
   fileInput.value = '';
 });

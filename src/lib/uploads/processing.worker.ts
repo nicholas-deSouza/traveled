@@ -63,8 +63,23 @@ export async function precheckPhoto(source: Blob): Promise<{ advisory: boolean |
     return { advisory: await advisoryPrecheck(context.getImageData(0, 0, 224, 224), () => import('nsfwjs')) };
   } finally { bitmap.close(); }
 }
+/** A small, browser-readable selection preview using the same HEIC safety checks. */
+export async function previewPhoto(source: Blob): Promise<{ blob: Blob }> {
+  const bitmap = await decodePhoto(source);
+  try {
+    imageDimensions(bitmap.width, bitmap.height);
+    const scale = Math.min(1, 320 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Your browser cannot preview this photo.');
+    context.drawImage(bitmap, 0, 0, width, height);
+    return { blob: await canvas.convertToBlob({ type: 'image/png' }) };
+  } finally { bitmap.close(); }
+}
 // Dedicated worker; nothing on the main thread executes this handler.
-self.onmessage = async (event: MessageEvent<{ source: Blob; advisory?: boolean }>) => {
-  try { self.postMessage(event.data.advisory ? await precheckPhoto(event.data.source) : await optimizePhoto(event.data.source)); }
+self.onmessage = async (event: MessageEvent<{ source: Blob; advisory?: boolean; preview?: boolean }>) => {
+  try { self.postMessage(event.data.preview ? await previewPhoto(event.data.source) : event.data.advisory ? await precheckPhoto(event.data.source) : await optimizePhoto(event.data.source)); }
   catch (error) { self.postMessage({ error: error instanceof Error ? error.message : 'The photo could not be processed.' }); }
 };

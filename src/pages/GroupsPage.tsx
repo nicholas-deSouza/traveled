@@ -22,7 +22,7 @@ export function GroupsPage() {
   }
   return <div className="py-8">
     <p className="text-sm font-medium uppercase tracking-[.18em] text-ember">Your people</p>
-    <h1 className="mt-2 font-display text-5xl">Your groups</h1>
+    <h1 className="mt-2 font-display text-3xl sm:text-5xl">Your groups</h1>
     <p className="mt-3 text-ink/65">A private home for your shared trips and photos. Only members can take part.</p>
     <Card className="mt-8 p-5"><form onSubmit={submit} className="flex flex-col items-start gap-4 sm:flex-row sm:items-end">
       <div className="w-full sm:max-w-sm"><Field label="New group name" value={name} onChange={event => setName(event.target.value)} maxLength={80} required placeholder="The wanderers" disabled={busy} /></div>
