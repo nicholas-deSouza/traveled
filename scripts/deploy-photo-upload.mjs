@@ -22,6 +22,7 @@ returning previous.admission_enabled as admission_enabled_before,
 const resumeQuery = `update upload_private.settings set admission_enabled = true
 where singleton and admission_enabled = false and admission_revision = $1::bigint
 returning admission_revision::text as admission_revision`;
+const admissionRevisionQuery = 'select admission_revision::text as admission_revision from upload_private.settings where singleton';
 const isRevision = value => typeof value === 'string' && /^[1-9]\d{0,18}$/.test(value)
   && BigInt(value) <= 9223372036854775807n;
 const vaultQuery = `with existing as materialized (
@@ -192,6 +193,13 @@ export async function deployBackend(phase, env, fetchRequest = fetch, diagnostic
     });
     admissionStatus = rows.length === 1 ? 'resumed' : 'operator_override';
     diagnostics.event('database.resume', rows.length === 1 ? 'restored' : 'skipped');
+  } else {
+    const rows = await query(admissionRevisionQuery, [], false, {
+      stage: 'database.admission-state',
+      validate: rows => Array.isArray(rows) && rows.length === 1 && isRevision(rows[0]?.admission_revision),
+      expected: 'one current admission revision row',
+    });
+    if (rows[0].admission_revision !== config.admissionRevision) admissionStatus = 'operator_override';
   }
   diagnostics.event(phase, 'completed');
   return { admission_status: admissionStatus };

@@ -71,6 +71,7 @@ function backend({ health = {}, fail, worker = { processed: 0 }, queryStatus = 2
         setAdmission(true);
         return json([{ admission_revision: String(revision) }]);
       }
+      if (body.query.startsWith('select admission_revision::text')) return json([{ admission_revision: String(revision) }]);
       if (body.query.includes('vault.create_secret')) return json([{ configured: 1 }]);
       if (body.query.includes('upload_schedule()')) scheduled = true;
       return json([]);
@@ -208,20 +209,37 @@ test('successful deployment leaves uploads paused when they were already disable
   assert.ok(!api.calls.some(call => call.body?.query?.startsWith('update upload_private.settings set admission_enabled = true')));
 });
 
-test('a same-value operator pause during deployment prevents automatic resume', async () => {
-  const api = backend();
-  const state = await deployBackend('prepare', env, api.fetchRequest);
-  api.setAdmission(false);
-  assert.deepEqual(await deployBackend('verify', verifyEnv(state), api.fetchRequest), { admission_status: 'operator_override' });
-  assert.equal(api.admissionEnabled, false);
+test('a same-value operator pause is reported for either previous admission state', async () => {
+  for (const admission of [true, false]) {
+    const api = backend({ admission });
+    const state = await deployBackend('prepare', env, api.fetchRequest);
+    api.setAdmission(false);
+    assert.deepEqual(await deployBackend('verify', verifyEnv(state), api.fetchRequest), { admission_status: 'operator_override' });
+    assert.equal(api.admissionEnabled, false);
+  }
 });
 
-test('an earlier deployment cannot resume a later deployment\'s pause', async () => {
-  const api = backend();
-  const earlier = await deployBackend('prepare', env, api.fetchRequest);
-  await deployBackend('prepare', env, api.fetchRequest);
-  assert.deepEqual(await deployBackend('verify', verifyEnv(earlier), api.fetchRequest), { admission_status: 'operator_override' });
-  assert.equal(api.admissionEnabled, false);
+test('an earlier deployment reports a later deployment\'s pause as an override', async () => {
+  for (const admission of [true, false]) {
+    const api = backend({ admission });
+    const earlier = await deployBackend('prepare', env, api.fetchRequest);
+    await deployBackend('prepare', env, api.fetchRequest);
+    assert.deepEqual(await deployBackend('verify', verifyEnv(earlier), api.fetchRequest), { admission_status: 'operator_override' });
+    assert.equal(api.admissionEnabled, false);
+  }
+});
+
+test('failed or malformed admission revision checks cannot report kept_paused', async () => {
+  for (const response of [new Response(null, { status: 500 }), Response.json([]),
+    Response.json([{ admission_revision: 'unexpected' }]),
+    Response.json([{ admission_revision: '1' }, { admission_revision: '1' }])]) {
+    const api = backend({ admission: false, fail: (url, options, body) =>
+      body?.query?.startsWith('select admission_revision::text') ? response : undefined });
+    const state = await deployBackend('prepare', env, api.fetchRequest);
+    await assert.rejects(deployBackend('verify', verifyEnv(state), api.fetchRequest), error => error.stage === 'database.admission-state');
+    assert.equal(api.admissionEnabled, false);
+    assert.ok(!api.calls.some(call => call.body?.query?.startsWith('update upload_private.settings set admission_enabled = true')));
+  }
 });
 
 test('verify rejects missing or invalid prepare outputs before any network request', async () => {
