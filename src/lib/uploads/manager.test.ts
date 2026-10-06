@@ -810,3 +810,33 @@ describe('upload lifecycle', () => {
     expect(dependencies.api.transfer).not.toHaveBeenCalled();
   });
 });
+
+it('never republishes a result dismissed in another tab during a stale refresh', async () => {
+  vi.useFakeTimers();
+  const { manager, dependencies, store } = harness([
+    submission({ id: 'rejected', phase: 'complete', outcome: 'rejected' }),
+  ]);
+  manager.start(); await flush();
+  const snapshots: string[][] = [];
+  manager.subscribe(() => snapshots.push(manager.getSnapshot().items.map(item => item.id)));
+  // The refresh already read metadata when another tab commits Clear.
+  const originalRequest = dependencies.api.request;
+  vi.spyOn(dependencies.api, 'request').mockImplementation(async body => {
+    if (body.action === 'list') {
+      const value = store.values.get('rejected')!;
+      store.values.set('rejected', { ...value, dismissed: true });
+    }
+    return originalRequest(body);
+  });
+  // Model the production store's atomic, permanent dismissal merge and return value.
+  vi.spyOn(store, 'put').mockImplementation(async value => {
+    const persisted = { ...value, dismissed: value.dismissed || store.values.get(value.submission.id)?.dismissed };
+    store.values.set(value.submission.id, structuredClone(persisted));
+    return persisted;
+  });
+  await vi.advanceTimersByTimeAsync(2500); await flush();
+  expect(snapshots.length).toBeGreaterThan(0);
+  expect(snapshots.every(ids => !ids.includes('rejected'))).toBe(true);
+  expect(manager.getSnapshot().items).toEqual([]);
+  expect(store.values.get('rejected')?.dismissed).toBe(true);
+});

@@ -135,3 +135,14 @@ it('distinguishes a full personal queue from project storage capacity', () => {
   expect(screen.getByText(/Your upload queue is full/)).toBeInTheDocument();
   expect(screen.queryByText(/Storage capacity unavailable/)).not.toBeInTheDocument();
 });
+
+it.each([
+  ['admission', /Paused by the upload service/],
+  ['queue', /Your upload queue is full/],
+] as const)('shows the %s pause reason instead of a scheduled retry', (pause_reason, message) => {
+  mock.snapshot.items = [item({ pause_reason, retry_at: '2030-01-01T12:00:00Z' })];
+  mount();
+  expect(screen.getByText(message)).toBeInTheDocument();
+  expect(screen.queryByText(/Retry scheduled/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Retry failed' })).toBeDisabled();
+});

@@ -100,8 +100,17 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
     if (clearedFailure) value.localError = null;
     items.set(submission.id, { ...submission, local_status: value.localFailed ? 'failed' : clearedFailure ? 'waiting' : previousItem?.local_status ?? 'waiting',
       local_error: clearedFailure ? null : value.localError ?? previousItem?.local_error ?? null, local_warning: previousItem?.local_warning });
-    if (submission.outcome) { files.delete(submission.id); targets.delete(submission.id); local(submission.id, null); }
-    await deps.store.put(value);
+    if (submission.outcome) {
+      files.delete(submission.id); targets.delete(submission.id);
+      items.set(submission.id, { ...items.get(submission.id)!, local_status: null, local_error: null });
+    }
+    const persisted = await deps.store.put(value);
+    // A concurrent Clear in another tab can be merged by the storage transaction.
+    // Apply that durable dismissal before publishing the refreshed result.
+    if (persisted?.dismissed) {
+      const current = metadata.get(submission.id);
+      if (current) current.dismissed = true;
+    }
     emit();
   }
   async function request(body: UploadRequest) {
@@ -299,7 +308,7 @@ export function createRunningUploadManager(userId: string, overrides: Partial<Ma
         if (current) {
           current.localFailed = value.localFailed; current.localError = value.localError;
           current.localFailureGeneration = value.localFailureGeneration; current.localFailureStage = value.localFailureStage;
-          current.dismissed = value.dismissed;
+          current.dismissed = current.dismissed || value.dismissed;
         }
         else metadata.set(value.submission.id, value);
       }
